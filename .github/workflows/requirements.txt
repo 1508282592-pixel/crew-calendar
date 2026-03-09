@@ -1,0 +1,4 @@
+playwright
+pytesseract
+pillow
+ics
