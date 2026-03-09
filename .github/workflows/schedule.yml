@@ -23,3 +23,11 @@ jobs:
       - run: playwright install
 
       - run: python main.py
+
+      - name: Commit calendar
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add crew_schedule.ics
+          git commit -m "update calendar" || echo "no changes"
+          git push
