@@ -2,10 +2,38 @@ BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:ics.py - http://git.io/lLljaA
 BEGIN:VEVENT
-DESCRIPTION:任务类型：航班\n航班号：9C8947\n航线：ZSSS → ZLXY\n机型：A321\n签到时间：17:15\n任务时间：14:25 - 17:15\n\n原始内容：\n首页\n我的任务\n个人中心\n飞行信息\n文件通告\n飞行互评\n意见反馈\n退出\n 段洋硕\n English Version\n返回\n按起降地\n按航班号\n按机号\n \n \n \n查询\n9C8947\nB30FZ\nA321\n14:25 上海虹桥 (ZSSS)\n西安咸阳 (ZLXY) 17:15\n9C8948\n9C8918\n起降信息\n机场信息\n航线信息\n飞机信息\n机组/旅客信息\n调整信息\n出港\n计划起飞\n14:25\n预计起飞\n14:25\n实际起飞\nCOBT\nCTOT\n机位号\n登机口\n航站楼\nT1\n关舱门\n撤轮档\n进港\n计划降落\n17:15\n预计降落\n17:15\n实际降落\n挡轮挡\n开舱门\n机位号\n航站楼\nT5
-DTEND:20260311T083437Z
-DTSTART:20260311T073437Z
-SUMMARY:✈️ 9C8947 ZSSS→ZLXY\nA321
-UID:29f07418-1a38-477f-b1e9-6cc75c6ec7c5@29f0.org
+DESCRIPTION:任务类型：航班\n\n原始内容：\n03月\n日 一 二 三 四 五 六\n1\n \n 2\n \n \n 3\n \n \n 4 5 6\n \n 7\n \n\n8\n \n 9\n \n 10 11 12 13\n \n 14\n \n\n15 16 17 18 19 20 21\n22 23 24 25 26 27 28\n29 30 31 \n航班\n\n训练\n\n考勤\n\n置位\n\n备份\n\n摆渡\n\n航班任务发布至2026-03-14
+DTEND:20260311T084804Z
+DTSTART:20260311T074804Z
+SUMMARY:✈️ 航班
+UID:05f518e7-3eed-4895-b6fa-286d4670fccf@05f5.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:任务类型：航班\n航班号：9C8947\n航线：ZSSS → ZLXY\n签到时间：14:25\n任务时间：14:25 - 17:15\n\n原始内容：\n03月13日 周五 置位 14:25- 17:15\n9C8947\n虹\nZSSS\n14:25\n置\n咸\nZLXY\n17:15\n9C8947\nB321FA321\n 12:40 上海虹桥 航班动态\n上海虹桥西安咸阳 14:25- 17:15\n\n随机人员\n\n杨刚(T\,R)钱俊(R)鲍国际(R)\n\n许晓君(B)\n\n李嘉臣段洋硕陈佳琪
+DTEND:20260313T171500Z
+DTSTART:20260313T142500Z
+SUMMARY:✈️ 9C8947 ZSSS→ZLXY
+UID:33cf776c-9f2e-4164-b682-88b5e5eff669@33cf.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:任务类型：置位\n\n原始内容：\n03月13日 周五 置位
+DTEND:20260311T094804Z
+DTSTART:20260311T084804Z
+SUMMARY:📍 置位
+UID:79471297-bf8f-41ac-9412-c37a126c2c7e@7947.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:任务类型：航班\n航班号：9C8946\n航线：ZLXY → ZSSS\n签到时间：20:15\n任务时间：09:05 - 22:40\n\n原始内容：\n03月14日 周六 航班 09:05- 22:40\n9C8946\n9C8995\n9C8996\n咸\nZLXY\n09:05\n虹\nZSSS\n渝\nZUCK\n虹\nZSSS\n22:40\n9C8946\nB32EFA321\n 07:10 西安咸阳 航班动态\n西安咸阳上海虹桥 09:05- 11:10\n\n副驾驶\n\n杨刚(T\,RT)段洋硕(R*)鲍国际(R)\n\n宋昕鸿(B)\n\n9C8995\nB326QA321\n 14:20 上海虹桥 航班动态\n上海虹桥重庆江北 16:05- 19:05\n\n副驾驶\n\n杨刚(T\,RT)鲍国际(R)段洋硕(R*)\n\n龚婷(B)\n\n兰力牛琨彭高庆得\n\n9C8996\nB326QA321\n 18:35 重庆江北 航班动态\n重庆江北上海虹桥 20:15- 22:40\n\n副驾驶\n\n杨刚(T\,RT)鲍国际(R)段洋硕(R*)\n\n龚婷(B)\n\n2026-03-19 查看更多
+DTEND:20260314T224000Z
+DTSTART:20260314T090500Z
+SUMMARY:✈️ 9C8946 ZLXY→ZSSS
+UID:8a452ae5-3871-4a21-ad96-eb560608ade9@8a45.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:任务类型：航班\n\n原始内容：\n03月14日 周六 航班
+DTEND:20260311T114804Z
+DTSTART:20260311T104804Z
+SUMMARY:✈️ 航班
+UID:3dff99bd-d02a-4917-a9ed-fce433fc2d9a@3dff.org
 END:VEVENT
 END:VCALENDAR
