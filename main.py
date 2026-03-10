@@ -209,15 +209,20 @@ def fill_login_form(page, code: str):
 
 
 def login(page, max_retries: int = 8):
-    page.goto(LOGIN_URL, wait_until="domcontentloaded")
-    page.wait_for_timeout(3500)
-
     for _attempt in range(1, max_retries + 1):
+        try:
+            page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=90000)
+            page.wait_for_timeout(5000)
+        except Exception:
+            if _attempt == max_retries:
+                raise
+            page.wait_for_timeout(5000)
+            continue
+
         best_code = solve_captcha(page)
 
         if len(best_code) != 4:
-            page.goto(LOGIN_URL, wait_until="domcontentloaded")
-            page.wait_for_timeout(2500)
+            page.wait_for_timeout(2000)
             continue
 
         candidates = generate_code_candidates(best_code, limit=12)
@@ -226,17 +231,21 @@ def login(page, max_retries: int = 8):
             try:
                 fill_login_form(page, cand)
                 page.click("text=Login")
-                page.wait_for_timeout(3500)
+                page.wait_for_timeout(4000)
 
-                body_text = page.locator("body").inner_text(timeout=5000)
+                body_text = page.locator("body").inner_text(timeout=8000)
                 if ("统一认证中心" not in body_text) and ("Login" not in body_text):
                     return
 
-                page.goto(LOGIN_URL, wait_until="domcontentloaded")
-                page.wait_for_timeout(2500)
+                page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=90000)
+                page.wait_for_timeout(3000)
+
             except Exception:
-                page.goto(LOGIN_URL, wait_until="domcontentloaded")
-                page.wait_for_timeout(2500)
+                try:
+                    page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=90000)
+                    page.wait_for_timeout(3000)
+                except Exception:
+                    pass
 
     raise RuntimeError("多次尝试后仍无法登录")
 
@@ -246,8 +255,15 @@ def login(page, max_retries: int = 8):
 # =========================
 
 def open_mission_page(page):
-    page.goto(MISSION_URL, wait_until="domcontentloaded")
-    page.wait_for_timeout(8000)
+    for i in range(3):
+        try:
+            page.goto(MISSION_URL, wait_until="domcontentloaded", timeout=90000)
+            page.wait_for_timeout(8000)
+            return
+        except Exception:
+            if i == 2:
+                raise
+            page.wait_for_timeout(5000)
 
 
 def get_task_header_lines(page):
@@ -269,9 +285,6 @@ def get_task_header_lines(page):
 
 
 def collect_day_entries_one_by_one(page):
-    """
-    一天一条展开，一天一条收起。
-    """
     day_entries = []
     header_lines = get_task_header_lines(page)
 
@@ -355,9 +368,6 @@ def extract_date(text: str):
 
 
 def split_day_entry_into_detailed_segments(day_entry: str):
-    """
-    只保留真正详细航段，过滤顶部摘要。
-    """
     lines = [x.strip() for x in day_entry.splitlines() if x.strip()]
     if not lines:
         return []
@@ -745,7 +755,17 @@ def create_multi_calendars(day_entries):
 def run():
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        page = browser.new_page(viewport={"width": 1400, "height": 1000})
+        context = browser.new_context(
+            viewport={"width": 1400, "height": 1000},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            )
+        )
+        page = context.new_page()
+        page.set_default_timeout(90000)
+        page.set_default_navigation_timeout(90000)
 
         login(page, max_retries=8)
         open_mission_page(page)
@@ -753,6 +773,7 @@ def run():
         day_entries = collect_day_entries_one_by_one(page)
         create_multi_calendars(day_entries)
 
+        context.close()
         browser.close()
 
 
