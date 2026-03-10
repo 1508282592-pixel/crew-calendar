@@ -1,11 +1,4 @@
 BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:ics.py - http://git.io/lLljaA
-BEGIN:VEVENT
-DESCRIPTION:日期：03月\n任务类型：任务\n\n原始内容：\n03月\n日 一 二 三 四 五 六\n1\n \n 2\n \n \n 3\n \n \n 4 5 6\n \n 7\n \n\n8\n \n 9\n \n 10 11 12 13\n \n 14\n \n\n15 16 17 18 19 20 21\n22 23 24 25 26 27 28\n29 30 31 \n航班\n\n训练\n\n考勤\n\n置位\n\n备份\n\n摆渡\n\n航班任务发布至2026-03-14
-DTEND:20260311T093514Z
-DTSTART:20260311T083514Z
-SUMMARY:🗂 任务
-UID:ff45b842-543f-4674-8741-c5ace91647ca@ff45.org
-END:VEVENT
 END:VCALENDAR
