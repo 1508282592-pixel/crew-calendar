@@ -1,4 +1,28 @@
 BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Crew Calendar//CN
+BEGIN:VEVENT
+UID:航班-9C8995-20260314T160500-20260314T190500@crew-calendar
+SUMMARY:✈️ 9C8995 ZSSS→ZUCK
+DTSTART;TZID=Asia/Shanghai:20260314T160500
+DTEND;TZID=Asia/Shanghai:20260314T190500
+DESCRIPTION:03月14日 周六 航班 09:05- 22:40\n航班号：9C8995\n航线：上海虹桥 → 重庆江北\n签到时间：14:20\n签到地点：上海虹桥\n任务时间：16:05 - 19:05\n机型：A321\n注册号：B326Q\n\n人员名单：\n杨刚(T\,RT)鲍国际(R)段洋硕(R*)\n龚婷(B)\n兰力牛琨彭高庆得\n\n航班追踪：https://www.flightradar24.com/data/flights/9C8995\n机号信息：https://www.flightradar24.com/data/aircraft/B326Q
+BEGIN:VALARM
+TRIGGER:-PT90M
+DESCRIPTION:签到提醒
+ACTION:DISPLAY
+END:VALARM
+END:VEVENT
+BEGIN:VEVENT
+UID:航班-9C8996-20260314T201500-20260314T224000@crew-calendar
+SUMMARY:✈️ 9C8996 ZUCK→ZSSS
+DTSTART;TZID=Asia/Shanghai:20260314T201500
+DTEND;TZID=Asia/Shanghai:20260314T224000
+DESCRIPTION:03月14日 周六 航班 09:05- 22:40\n航班号：9C8996\n航线：重庆江北 → 上海虹桥\n签到时间：18:35\n签到地点：重庆江北\n任务时间：20:15 - 22:40\n机型：A321\n注册号：B326Q\n\n人员名单：\n杨刚(T\,RT)鲍国际(R)段洋硕(R*)\n龚婷(B)\n\n航班追踪：https://www.flightradar24.com/data/flights/9C8996\n机号信息：https://www.flightradar24.com/data/aircraft/B326Q
+BEGIN:VALARM
+TRIGGER:-PT90M
+DESCRIPTION:签到提醒
+ACTION:DISPLAY
+END:VALARM
+END:VEVENT
 END:VCALENDAR
