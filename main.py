@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 from PIL import Image, ImageOps
 import pytesseract
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import sync_playwright
 from ics import Calendar, Event
 
 LOGIN_URL = "https://cp.9cair.com"
@@ -31,7 +31,6 @@ def preprocess_captcha(img_bytes: bytes) -> Image.Image:
 
 
 def extract_captcha_bytes(page) -> bytes:
-    # 优先找带 base64 的验证码图
     imgs = page.locator("img")
     count = imgs.count()
 
@@ -50,8 +49,6 @@ def extract_captcha_bytes(page) -> bytes:
 def solve_captcha(page) -> str:
     img_bytes = extract_captcha_bytes(page)
     processed = preprocess_captcha(img_bytes)
-
-    processed.save("captcha_processed.png")
 
     config = r'--psm 8 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
     raw = pytesseract.image_to_string(processed, config=config)
@@ -84,7 +81,7 @@ def login(page, max_retries: int = 5):
 
             if len(code) != 4:
                 print(f"第 {attempt} 次验证码长度异常: {code}")
-                page.reload(wait_until="domcontentloaded")
+                page.goto(LOGIN_URL, wait_until="domcontentloaded")
                 page.wait_for_timeout(2500)
                 continue
 
@@ -92,12 +89,10 @@ def login(page, max_retries: int = 5):
             page.click("text=Login")
             page.wait_for_timeout(5000)
 
-            current_url = page.url
             body_text = page.locator("body").inner_text(timeout=5000)
 
-            # 登录成功：不再停留在登录页，或者正文出现机组门户相关字样
             if ("统一认证中心" not in body_text) and ("Login" not in body_text):
-                print(f"登录成功，attempt={attempt}, url={current_url}")
+                print(f"登录成功，attempt={attempt}")
                 return
 
             print(f"第 {attempt} 次登录疑似失败，准备重试")
@@ -134,25 +129,66 @@ def expand_all(page):
             for i in range(count):
                 try:
                     items.nth(i).click(timeout=800)
-                    page.wait_for_timeout(250)
+                    page.wait_for_timeout(200)
                 except:
                     pass
         except:
             pass
 
-    page.wait_for_timeout(2000)
+    page.wait_for_timeout(3000)
 
 
-def create_calendar_from_page(page):
-    text = page.locator("body").inner_text()
+def extract_task_text(page):
+    # 优先找主内容区
+    candidates = [
+        "text=03月",
+        "text=航班",
+        "text=置位",
+        "text=训练",
+        "text=摆渡",
+        "text=查看更多",
+    ]
 
+    texts = []
+
+    for key in candidates:
+        try:
+            locator = page.locator(f"body")
+            body_text = locator.inner_text(timeout=5000)
+            if key.replace("text=", "") in body_text:
+                texts.append(body_text)
+                break
+        except:
+            pass
+
+    if not texts:
+        texts.append(page.locator("body").inner_text())
+
+    text = texts[0]
+
+    # 尽量从“查看更多”上方开始截取任务区附近文字
+    marker_candidates = ["03月", "航班", "置位", "训练", "摆渡"]
+    start_idx = 0
+    for marker in marker_candidates:
+        idx = text.find(marker)
+        if idx != -1:
+            start_idx = idx
+            break
+
+    return text[start_idx:start_idx + 4000]
+
+
+def create_calendar_with_debug_text(task_text):
     c = Calendar()
 
+    start = datetime.now() + timedelta(days=1)
+    start = start.replace(hour=12, minute=0, second=0, microsecond=0)
+
     e = Event()
-    e.name = "Crew Tasks Loaded"
-    e.begin = datetime.now()
-    e.end = datetime.now() + timedelta(hours=1)
-    e.description = text[:3000]
+    e.name = "Task Debug"
+    e.begin = start
+    e.end = start + timedelta(hours=1)
+    e.description = task_text
 
     c.events.add(e)
 
@@ -168,7 +204,11 @@ def run():
         login(page, max_retries=5)
         open_mission_page(page)
         expand_all(page)
-        create_calendar_from_page(page)
+
+        task_text = extract_task_text(page)
+        print(task_text)
+
+        create_calendar_with_debug_text(task_text)
 
         browser.close()
 
