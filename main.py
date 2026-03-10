@@ -9,7 +9,6 @@ from zoneinfo import ZoneInfo
 from PIL import Image, ImageOps, ImageFilter
 import pytesseract
 from playwright.sync_api import sync_playwright
-from ics import Calendar, Event
 
 LOGIN_URL = "https://cp.9cair.com"
 MISSION_URL = "https://cp.9cair.com/html/task/mission.html"
@@ -241,6 +240,10 @@ def detect_icon(task_type: str) -> str:
     }.get(task_type, "🗂")
 
 
+def fr24_flight_code(flight_number: str) -> str:
+    return re.sub(r"[A-Za-z]$", "", flight_number.strip())
+
+
 def get_task_header_lines(page):
     body = page.locator("body")
     text = body.inner_text()
@@ -309,7 +312,7 @@ def collect_day_entries_one_by_one(page):
 def split_day_entry_into_segments(day_entry: str):
     """
     把一天里展开出来的多航段内容按航班号拆成多个独立段。
-    每段都保留当天标题。
+    每段保留当天标题。
     """
     lines = [x.strip() for x in day_entry.splitlines() if x.strip()]
     if not lines:
@@ -350,17 +353,13 @@ def extract_flight_no(segment: str) -> str:
 
 
 def extract_airports(segment: str):
-    m_cn = re.search(r'([\u4e00-\u9fff]{2,10})\s*([\u4e00-\u9fff]{2,10})\s*(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})', segment)
     codes = re.findall(r'\b[A-Z]{4}\b', segment)
-
     uniq = []
     for c in codes:
         if c not in uniq:
             uniq.append(c)
-
     if len(uniq) >= 2:
         return uniq[0], uniq[1]
-
     return "", ""
 
 
@@ -442,28 +441,23 @@ def extract_people_lines(segment: str):
     return out
 
 
-def build_title(task_type, flight_no, dep, arr, model, reg):
+def build_title(task_type, flight_no, dep, arr):
     icon = detect_icon(task_type)
 
     if flight_no and dep and arr:
-        title = f"{icon} {flight_no} {dep}→{arr}"
-    elif flight_no:
-        title = f"{icon} {flight_no}"
-    elif dep and arr:
-        title = f"{icon} {dep}→{arr}"
-    else:
-        title = f"{icon} {task_type}"
-
-    extra = " ".join([x for x in [model, reg] if x])
-    if extra:
-        title += f"\n{extra}"
-
-    return title
+        return f"{icon} {flight_no} {dep}→{arr}"
+    if flight_no:
+        return f"{icon} {flight_no}"
+    if dep and arr:
+        return f"{icon} {dep}→{arr}"
+    return f"{icon} {task_type}"
 
 
 def build_description(day_header, task_type, flight_no, dep, arr, model, reg,
                       start_time, end_time, checkin_time, checkin_place,
-                      people_type, people_lines, segment):
+                      people_type, people_lines):
+    fr24_number = fr24_flight_code(flight_no) if flight_no else ""
+
     lines = []
     lines.append(f"日期：{day_header}")
     lines.append(f"任务类型：{task_type}")
@@ -471,27 +465,32 @@ def build_description(day_header, task_type, flight_no, dep, arr, model, reg,
         lines.append(f"航班号：{flight_no}")
     if dep or arr:
         lines.append(f"航线：{dep} → {arr}")
-    if model:
-        lines.append(f"机型：{model}")
-    if reg:
-        lines.append(f"注册号：{reg}")
     if checkin_time:
         lines.append(f"签到时间：{checkin_time}")
     if checkin_place:
         lines.append(f"签到地点：{checkin_place}")
     if start_time and end_time:
         lines.append(f"任务时间：{start_time} - {end_time}")
+    if model:
+        lines.append(f"机型：{model}")
+    if reg:
+        lines.append(f"注册号：{reg}")
 
     if people_type:
+        lines.append("")
         lines.append(f"人员类型：{people_type}")
+
     if people_lines:
         lines.append("人员名单：")
         for p in people_lines:
             lines.append(p)
 
-    lines.append("")
-    lines.append("原始内容：")
-    lines.append(segment)
+    if fr24_number:
+        lines.append("")
+        lines.append(f"航班追踪：https://www.flightradar24.com/data/flights/{fr24_number}")
+    if reg:
+        lines.append(f"机号信息：https://www.flightradar24.com/data/aircraft/{reg}")
+
     return "\n".join(lines)
 
 
@@ -514,13 +513,83 @@ def event_quality(flight_no, dep, arr, reg, model, checkin_time, checkin_place, 
     return score
 
 
+def format_dt_local(dt: datetime) -> str:
+    return dt.strftime("%Y%m%dT%H%M%S")
+
+
+def escape_ics_text(text: str) -> str:
+    text = text.replace("\\", "\\\\")
+    text = text.replace(";", r"\;")
+    text = text.replace(",", r"\,")
+    text = text.replace("\n", r"\n")
+    return text
+
+
+def build_vevent(item: dict) -> str:
+    title = build_title(item["task_type"], item["flight_no"], item["dep"], item["arr"])
+    desc = build_description(
+        item["day_header"], item["task_type"], item["flight_no"], item["dep"], item["arr"],
+        item["model"], item["reg"], item["start_time"], item["end_time"],
+        item["checkin_time"], item["checkin_place"], item["people_type"], item["people_lines"]
+    )
+
+    location = ""
+    if item["arr"]:
+        location = item["arr"]
+
+    uid = (
+        f'{item["task_type"]}-'
+        f'{item["flight_no"]}-'
+        f'{format_dt_local(item["start_dt"])}-'
+        f'{format_dt_local(item["end_dt"])}@crew-calendar'
+    )
+
+    lines = [
+        "BEGIN:VEVENT",
+        f"UID:{uid}",
+        f"SUMMARY:{escape_ics_text(title)}",
+        f"DTSTART;TZID=Asia/Shanghai:{format_dt_local(item['start_dt'])}",
+        f"DTEND;TZID=Asia/Shanghai:{format_dt_local(item['end_dt'])}",
+    ]
+
+    if location:
+        lines.append(f"LOCATION:{escape_ics_text(location)}")
+
+    lines.append(f"DESCRIPTION:{escape_ics_text(desc)}")
+
+    # 签到前90分钟提醒；没有签到时间就退回到开始前90分钟
+    alarm_base = item["checkin_dt"] if item["checkin_dt"] else item["start_dt"]
+    trigger_minutes = int((item["start_dt"] - alarm_base).total_seconds() // 60)
+    # 如果签到时间早于起飞，alarm_base就是签到时间，我们固定90分钟前提醒
+    lines.extend([
+        "BEGIN:VALARM",
+        "TRIGGER:-PT90M",
+        "DESCRIPTION:签到提醒",
+        "ACTION:DISPLAY",
+        "END:VALARM",
+    ])
+
+    lines.append("END:VEVENT")
+    return "\n".join(lines)
+
+
+def write_calendar(filename: str, events: list[dict]):
+    content = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Crew Calendar//CN"]
+    for item in events:
+        content.append(build_vevent(item))
+    content.append("END:VCALENDAR")
+
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write("\n".join(content))
+
+
 def create_multi_calendars(day_entries):
-    calendars = {
-        "flight": Calendar(),
-        "positioning": Calendar(),
-        "training": Calendar(),
-        "ferry": Calendar(),
-        "other": Calendar(),
+    buckets = {
+        "flight": [],
+        "positioning": [],
+        "training": [],
+        "ferry": [],
+        "other": [],
     }
 
     best_events = {}
@@ -554,6 +623,12 @@ def create_multi_calendars(day_entries):
             if end_dt <= start_dt:
                 end_dt += timedelta(days=1)
 
+            checkin_dt = None
+            if checkin_time:
+                checkin_dt = make_datetime(year, month, day, checkin_time)
+                if checkin_dt > start_dt:
+                    checkin_dt -= timedelta(days=1)
+
             group_key = (
                 task_type,
                 flight_no,
@@ -574,6 +649,7 @@ def create_multi_calendars(day_entries):
                 "model": model,
                 "start_dt": start_dt,
                 "end_dt": end_dt,
+                "checkin_dt": checkin_dt,
                 "start_time": start_time,
                 "end_time": end_time,
                 "checkin_time": checkin_time,
@@ -581,7 +657,6 @@ def create_multi_calendars(day_entries):
                 "people_type": people_type,
                 "people_lines": people_lines,
                 "day_header": day_header,
-                "segment": seg,
                 "quality": quality,
             }
 
@@ -589,35 +664,18 @@ def create_multi_calendars(day_entries):
                 best_events[group_key] = candidate
 
     for item in best_events.values():
-        e = Event()
-        e.name = build_title(
-            item["task_type"], item["flight_no"], item["dep"], item["arr"],
-            item["model"], item["reg"]
-        )
-        e.begin = item["start_dt"]
-        e.end = item["end_dt"]
-        e.description = build_description(
-            item["day_header"], item["task_type"], item["flight_no"],
-            item["dep"], item["arr"], item["model"], item["reg"],
-            item["start_time"], item["end_time"], item["checkin_time"],
-            item["checkin_place"], item["people_type"], item["people_lines"],
-            item["segment"]
-        )
-
         bucket = task_bucket(item["task_type"])
-        calendars[bucket].events.add(e)
+        buckets[bucket].append(item)
 
-    mapping = {
-        "flight": "flight.ics",
-        "positioning": "positioning.ics",
-        "training": "training.ics",
-        "ferry": "ferry.ics",
-        "other": "other.ics",
-    }
+    # 排序
+    for key in buckets:
+        buckets[key].sort(key=lambda x: (x["start_dt"], x["flight_no"]))
 
-    for key, filename in mapping.items():
-        with open(filename, "w", encoding="utf-8") as f:
-            f.writelines(calendars[key])
+    write_calendar("flight.ics", buckets["flight"])
+    write_calendar("positioning.ics", buckets["positioning"])
+    write_calendar("training.ics", buckets["training"])
+    write_calendar("ferry.ics", buckets["ferry"])
+    write_calendar("other.ics", buckets["other"])
 
 
 def run():
