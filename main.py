@@ -224,6 +224,8 @@ def expand_task_rows_only(page):
         except Exception:
             pass
 
+    page.wait_for_timeout(3000)
+
 
 def normalize_text(text: str) -> str:
     text = text.replace("\u00a0", " ")
@@ -236,6 +238,7 @@ def normalize_text(text: str) -> str:
 def extract_task_area_text(page) -> str:
     text = page.locator("body").inner_text()
     text = normalize_text(text)
+    save_text("mission_body_text.txt", text)
 
     markers = ["01月", "02月", "03月", "04月", "05月", "06月",
                "07月", "08月", "09月", "10月", "11月", "12月"]
@@ -272,7 +275,9 @@ def split_day_blocks(task_area_text: str):
     if current.strip():
         blocks.append(current.strip())
 
-    return [normalize_text(b) for b in blocks if len(normalize_text(b)) > 8]
+    out = [normalize_text(b) for b in blocks if len(normalize_text(b)) > 8]
+    save_text("task_blocks.txt", "\n\n==========\n\n".join(out))
+    return out
 
 
 def detect_task_type(day_block: str) -> str:
@@ -281,6 +286,15 @@ def detect_task_type(day_block: str) -> str:
         if t in header:
             return t
     return "任务"
+
+
+def task_bucket(task_type: str) -> str:
+    return {
+        "航班": "flight",
+        "置位": "positioning",
+        "训练": "training",
+        "摆渡": "ferry",
+    }.get(task_type, "other")
 
 
 def detect_icon(task_type: str) -> str:
@@ -346,9 +360,7 @@ def extract_reg_and_model(segment: str):
 
     m_combo = re.search(r'(B\d{3,4}[A-Z]?)(A3\d{2})', segment)
     if m_combo:
-        reg = m_combo.group(1)
-        model = m_combo.group(2)
-        return reg, model
+        return m_combo.group(1), m_combo.group(2)
 
     m_reg = re.search(r'\bB\d{3,4}[A-Z]?\b', segment)
     if m_reg:
@@ -361,27 +373,31 @@ def extract_reg_and_model(segment: str):
     return reg, model
 
 
-def extract_times(segment: str):
-    times = re.findall(r'\b\d{2}:\d{2}\b', segment)
+def extract_all_times(segment: str):
+    return re.findall(r'\b\d{2}:\d{2}\b', segment)
+
+
+def extract_start_end_time(segment: str):
+    m = re.search(r'([^\s]+)[^\n]*?(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})', segment)
+    if m:
+        return m.group(2), m.group(3)
+
+    times = extract_all_times(segment)
     if len(times) >= 2:
-        return times[0], times[-1], times
-    return "", "", times
+        return times[-2], times[-1]
+
+    return "", ""
 
 
 def extract_checkin(segment: str):
     m = re.search(r'(\d{2}:\d{2})\s*([^\s]+)\s*航班动态', segment)
     if m:
         return m.group(1), m.group(2)
-
-    times = re.findall(r'\b\d{2}:\d{2}\b', segment)
-    if len(times) >= 3:
-        return times[-2], ""
-
     return "", ""
 
 
 def extract_people_type(segment: str):
-    for t in ["随机人员", "副驾驶", "机长", "乘务长"]:
+    for t in ["随机人员", "乘务长", "副驾驶", "机长"]:
         if t in segment:
             return t
     return ""
@@ -390,30 +406,37 @@ def extract_people_type(segment: str):
 def extract_people_lines(segment: str):
     lines = [x.strip() for x in segment.splitlines() if x.strip()]
     out = []
-    start = False
+
+    capture = False
     for line in lines:
-        if line in ["随机人员", "副驾驶", "机长", "乘务长"]:
-            start = True
+        if line in ["随机人员", "乘务长", "副驾驶", "机长"]:
+            capture = True
             continue
-        if start:
-            if "航班动态" in line:
-                continue
-            if re.search(r'\b9C\d', line):
-                continue
-            if re.search(r'\b[A-Z]{4}\b', line):
-                continue
-            if re.search(r'\d{2}:\d{2}', line):
-                continue
-            out.append(line)
+
+        if not capture:
+            continue
+
+        if "航班动态" in line:
+            continue
+        if re.search(r'\b9C\d', line):
+            continue
+        if re.search(r'\b[A-Z]{4}\b', line):
+            continue
+        if re.search(r'\d{2}:\d{2}', line):
+            continue
+        if re.search(r'^B\d{3,4}', line):
+            continue
+
+        out.append(line)
+
     return out
 
 
 def build_title(task_type, flight_no, dep, arr, model, reg):
     icon = detect_icon(task_type)
+
     if flight_no and dep and arr:
         title = f"{icon} {flight_no} {dep}→{arr}"
-    elif dep and arr:
-        title = f"{icon} {task_type} {dep}→{arr}"
     elif flight_no:
         title = f"{icon} {flight_no} {task_type}"
     else:
@@ -446,11 +469,13 @@ def build_description(day_header, task_type, flight_no, dep, arr, model, reg,
         lines.append(f"签到地点：{checkin_place}")
     if start_time and end_time:
         lines.append(f"任务时间：{start_time} - {end_time}")
+
     if people_type:
         lines.append(f"人员类型：{people_type}")
     if people_lines:
         lines.append("人员名单：")
-        lines.extend(people_lines)
+        for p in people_lines:
+            lines.append(p)
 
     lines.append("")
     lines.append("原始内容：")
@@ -458,17 +483,25 @@ def build_description(day_header, task_type, flight_no, dep, arr, model, reg,
     return "\n".join(lines)
 
 
-def create_calendar_from_blocks(day_blocks):
-    c = Calendar()
+def create_multi_calendars(day_blocks):
+    calendars = {
+        "flight": Calendar(),
+        "positioning": Calendar(),
+        "training": Calendar(),
+        "ferry": Calendar(),
+        "other": Calendar(),
+    }
+
     now = datetime.now()
     created = 0
+    seen = set()
 
     for day_block in day_blocks:
         task_type = detect_task_type(day_block)
         date_info = extract_date(day_block)
 
-        m = re.search(r'(\d{2}月\d{2}日\s*周.\s*.*)', day_block.splitlines()[0])
-        day_header = m.group(1) if m else ""
+        header_line = day_block.splitlines()[0] if day_block.splitlines() else ""
+        day_header = header_line
 
         segments = split_segments(day_block)
 
@@ -476,10 +509,15 @@ def create_calendar_from_blocks(day_blocks):
             flight_no = extract_flight_no(seg)
             dep, arr = extract_airports(seg)
             reg, model = extract_reg_and_model(seg)
-            start_time, end_time, _all = extract_times(seg)
+            start_time, end_time = extract_start_end_time(seg)
             checkin_time, checkin_place = extract_checkin(seg)
             people_type = extract_people_type(seg)
             people_lines = extract_people_lines(seg)
+
+            dedup_key = (task_type, flight_no, dep, arr, start_time, end_time)
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
 
             if date_info and start_time and end_time:
                 year, month, day = date_info
@@ -500,7 +538,9 @@ def create_calendar_from_blocks(day_blocks):
                 start_time, end_time, checkin_time, checkin_place,
                 people_type, people_lines, seg
             )
-            c.events.add(e)
+
+            bucket = task_bucket(task_type)
+            calendars[bucket].events.add(e)
             created += 1
 
     if created == 0:
@@ -511,10 +551,19 @@ def create_calendar_from_blocks(day_blocks):
         e.begin = start
         e.end = start + timedelta(hours=1)
         e.description = "脚本已运行，但未解析到任务。"
-        c.events.add(e)
+        calendars["other"].events.add(e)
 
-    with open("crew_schedule.ics", "w", encoding="utf-8") as f:
-        f.writelines(c)
+    mapping = {
+        "flight": "flight.ics",
+        "positioning": "positioning.ics",
+        "training": "training.ics",
+        "ferry": "ferry.ics",
+        "other": "other.ics",
+    }
+
+    for key, filename in mapping.items():
+        with open(filename, "w", encoding="utf-8") as f:
+            f.writelines(calendars[key])
 
 
 def run():
@@ -528,7 +577,7 @@ def run():
 
         task_area_text = extract_task_area_text(page)
         day_blocks = split_day_blocks(task_area_text)
-        create_calendar_from_blocks(day_blocks)
+        create_multi_calendars(day_blocks)
 
         browser.close()
 
