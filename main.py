@@ -326,19 +326,26 @@ def make_datetime(year, month, day, hhmm):
 
 
 def split_segments(day_block: str):
+    """
+    只保留真正详细航段，过滤摘要块。
+    """
     positions = list(re.finditer(r'\b9C\d{3,4}[A-Z]?\b', day_block))
     if not positions:
-        return [day_block]
+        return []
 
     segments = []
     for i, m in enumerate(positions):
         start = m.start()
         end = positions[i + 1].start() if i + 1 < len(positions) else len(day_block)
         seg = day_block[start:end].strip()
-        if len(seg) > 5:
+
+        airports = re.findall(r'\b[A-Z]{4}\b', seg)
+        time_ranges = re.findall(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', seg)
+
+        if len(airports) >= 2 and len(time_ranges) >= 1:
             segments.append(seg)
 
-    return segments or [day_block]
+    return segments
 
 
 def extract_flight_no(segment: str) -> str:
@@ -437,9 +444,9 @@ def build_title(task_type, flight_no, dep, arr, model, reg):
     if flight_no and dep and arr:
         title = f"{icon} {flight_no} {dep}→{arr}"
     elif dep and arr:
-        title = f"{icon} {task_type} {dep}→{arr}"
+        title = f"{icon} {dep}→{arr}"
     elif flight_no:
-        title = f"{icon} {flight_no} {task_type}"
+        title = f"{icon} {flight_no}"
     else:
         title = f"{icon} {task_type}"
 
@@ -516,6 +523,9 @@ def create_multi_calendars(day_blocks):
             if not (date_info and start_time and end_time):
                 continue
 
+            if not flight_no or not (dep and arr):
+                continue
+
             year, month, day = date_info
             start_dt = make_datetime(year, month, day, start_time)
             end_dt = make_datetime(year, month, day, end_time)
@@ -523,16 +533,11 @@ def create_multi_calendars(day_blocks):
             if end_dt <= start_dt:
                 end_dt += timedelta(days=1)
 
-            if not flight_no and not (dep and arr):
-                continue
-
             dedup_key = (
                 task_type,
                 flight_no,
                 dep,
                 arr,
-                reg,
-                model,
                 start_dt.isoformat(),
                 end_dt.isoformat(),
             )
