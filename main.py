@@ -50,7 +50,6 @@ TIME_RANGE_RE = re.compile(r"(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})")
 DAY_HEADER_RE = re.compile(r"^\d{2}月\d{2}日\s*周.")
 PAGE_YEAR_MONTH_RE = re.compile(r"(\d{4})年(\d{1,2})月")
 PURE_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
-CHINESE_NAME_RE = re.compile(r"[\u4e00-\u9fff]{2,4}(?:\([^)]*\))?")
 
 
 # =========================
@@ -133,10 +132,10 @@ def expand_char_options(ch: str):
         "0": ["0", "O"], "O": ["O", "0"],
         "1": ["1", "I", "L"], "I": ["I", "1", "L"], "L": ["L", "1", "I"],
         "5": ["5", "S"], "S": ["S", "5"],
-        "8": ["8", "B"], "B": ["B", "8"],
+        "8": ["8", "B"], "B": ["B", "8", "3"],
         "2": ["2", "Z"], "Z": ["Z", "2"],
         "6": ["6", "G"], "G": ["G", "6"],
-        "3": ["3", "B"], "B": ["B", "8", "3"],
+        "3": ["3", "B"],
         "7": ["7", "T"], "T": ["T", "7"],
     }
     return mapping.get(ch, [ch])
@@ -601,9 +600,11 @@ def split_people_from_line(line: str):
     if any(x in line for x in ["查看更多", "航班动态"]):
         return []
 
-    matches = CHINESE_NAME_RE.findall(line)
-    if matches:
-        return [m.strip() for m in matches if m.strip()]
+    # 只有存在括号备注时才拆分，避免纯中文连写误切
+    if "(" in line and ")" in line:
+        matches = re.findall(r"[\u4e00-\u9fff]{2,4}\([^)]*\)", line)
+        if matches:
+            return [m.strip() for m in matches if m.strip()]
 
     return [line]
 
@@ -636,7 +637,7 @@ def extract_people_lines(card_text: str):
 
         pieces = split_people_from_line(line)
         for p in pieces:
-            if p not in out:
+            if p and p not in out:
                 out.append(p)
 
     return out
