@@ -347,44 +347,50 @@ def extract_date(text: str):
     return datetime.now(SH_TZ).year, int(m.group(1)), int(m.group(2))
 
 
+def is_flight_line(line: str) -> bool:
+    return re.fullmatch(r'9C\d{3,4}[A-Z]?', line.strip()) is not None
+
+
+def is_reg_model_line(line: str) -> bool:
+    return re.fullmatch(r'B\d{3,4}[A-Z]{0,2}A3\d{2}', line.strip()) is not None
+
+
 def split_day_entry_into_detailed_segments(day_entry: str):
+    """
+    只有当“航班号行”的下一行就是“注册号+机型”时，
+    才认定这是真正详细航段的开始。
+    这样可以彻底跳过顶部摘要里的 9C8946 / 9C8995 / 9C8996。
+    """
     lines = [x.strip() for x in day_entry.splitlines() if x.strip()]
     if not lines:
         return []
 
     header = lines[0]
+    starts = []
+
+    for i in range(1, len(lines) - 1):
+        if is_flight_line(lines[i]) and is_reg_model_line(lines[i + 1]):
+            starts.append(i)
+
     segments = []
-    current = None
-
-    for line in lines[1:]:
-        if re.fullmatch(r'9C\d{3,4}[A-Z]?', line):
-            if current:
-                segments.append(current)
-            current = [header, line]
-        else:
-            if current is not None:
-                current.append(line)
-
-    if current:
-        segments.append(current)
-
-    out = []
-    for seg_lines in segments:
+    for idx, start_i in enumerate(starts):
+        end_i = starts[idx + 1] if idx + 1 < len(starts) else len(lines)
+        seg_lines = [header] + lines[start_i:end_i]
         seg_text = "\n".join(seg_lines)
+
         has_flight_dynamic = "航班动态" in seg_text
-        has_reg_model = re.search(r'B\d{3,4}[A-Z]{0,2}A3\d{2}', seg_text) is not None
         has_range = re.search(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', seg_text) is not None
 
-        if has_flight_dynamic and has_reg_model and has_range:
-            out.append(seg_text)
+        if has_flight_dynamic and has_range:
+            segments.append(seg_text)
 
-    return out
+    return segments
 
 
 def extract_flight_no(segment: str) -> str:
     for line in segment.splitlines():
         line = line.strip()
-        if re.fullmatch(r'9C\d{3,4}[A-Z]?', line):
+        if is_flight_line(line):
             return line
     m = re.search(r'\b9C\d{3,4}[A-Z]?\b', segment)
     return m.group(0) if m else ""
@@ -479,7 +485,7 @@ def extract_people_lines(segment: str):
 
         if "航班动态" in line:
             continue
-        if re.fullmatch(r'9C\d{3,4}[A-Z]?', line):
+        if is_flight_line(line):
             continue
         if re.search(r'\b[A-Z]{4}\b', line):
             continue
