@@ -321,10 +321,6 @@ def make_datetime(year, month, day, hhmm):
 
 
 def split_segments(day_block: str):
-    """
-    宽松版：只要从 9C 航班号开始，就切成一个候选段。
-    后面再做去重，不在这里过度过滤。
-    """
     positions = list(re.finditer(r'\b9C\d{3,4}[A-Z]?\b', day_block))
     if not positions:
         return []
@@ -435,10 +431,10 @@ def build_title(task_type, flight_no, dep, arr, model, reg):
 
     if flight_no and dep and arr:
         title = f"{icon} {flight_no} {dep}→{arr}"
-    elif dep and arr:
-        title = f"{icon} {dep}→{arr}"
     elif flight_no:
         title = f"{icon} {flight_no}"
+    elif dep and arr:
+        title = f"{icon} {dep}→{arr}"
     else:
         title = f"{icon} {task_type}"
 
@@ -483,6 +479,25 @@ def build_description(day_header, task_type, flight_no, dep, arr, model, reg,
     return "\n".join(lines)
 
 
+def event_quality(flight_no, dep, arr, reg, model, checkin_time, checkin_place, people_lines):
+    score = 0
+    if flight_no:
+        score += 10
+    if dep and arr:
+        score += 50
+    if reg:
+        score += 10
+    if model:
+        score += 10
+    if checkin_time:
+        score += 10
+    if checkin_place:
+        score += 10
+    if people_lines:
+        score += 10
+    return score
+
+
 def create_multi_calendars(day_blocks):
     calendars = {
         "flight": Calendar(),
@@ -492,7 +507,7 @@ def create_multi_calendars(day_blocks):
         "other": Calendar(),
     }
 
-    seen = set()
+    best_events = {}
 
     for day_block in day_blocks:
         task_type = detect_task_type(day_block)
@@ -511,48 +526,70 @@ def create_multi_calendars(day_blocks):
             people_type = extract_people_type(seg)
             people_lines = extract_people_lines(seg)
 
-            if not date_info:
+            if not date_info or not flight_no or not start_time or not end_time:
                 continue
 
-            if not flight_no:
-                continue
-
-            # 允许先生成事件，哪怕航线暂时没抓全
             year, month, day = date_info
+            start_dt = make_datetime(year, month, day, start_time)
+            end_dt = make_datetime(year, month, day, end_time)
 
-            if start_time and end_time:
-                start_dt = make_datetime(year, month, day, start_time)
-                end_dt = make_datetime(year, month, day, end_time)
-                if end_dt <= start_dt:
-                    end_dt += timedelta(days=1)
-            else:
-                # 没抓到时间就跳过，避免生成乱时间的事件
-                continue
+            if end_dt <= start_dt:
+                end_dt += timedelta(days=1)
 
-            dedup_key = (
+            # 用“任务类型 + 航班号 + 开始结束时间”做主键
+            group_key = (
                 task_type,
                 flight_no,
-                dep,
-                arr,
                 start_dt.isoformat(),
                 end_dt.isoformat(),
             )
-            if dedup_key in seen:
-                continue
-            seen.add(dedup_key)
 
-            e = Event()
-            e.name = build_title(task_type, flight_no, dep, arr, model, reg)
-            e.begin = start_dt
-            e.end = end_dt
-            e.description = build_description(
-                day_header, task_type, flight_no, dep, arr, model, reg,
-                start_time, end_time, checkin_time, checkin_place,
-                people_type, people_lines, seg
+            quality = event_quality(
+                flight_no, dep, arr, reg, model, checkin_time, checkin_place, people_lines
             )
 
-            bucket = task_bucket(task_type)
-            calendars[bucket].events.add(e)
+            candidate = {
+                "task_type": task_type,
+                "flight_no": flight_no,
+                "dep": dep,
+                "arr": arr,
+                "reg": reg,
+                "model": model,
+                "start_dt": start_dt,
+                "end_dt": end_dt,
+                "start_time": start_time,
+                "end_time": end_time,
+                "checkin_time": checkin_time,
+                "checkin_place": checkin_place,
+                "people_type": people_type,
+                "people_lines": people_lines,
+                "day_header": day_header,
+                "segment": seg,
+                "quality": quality,
+            }
+
+            # 只保留同组里信息更完整的一条
+            if group_key not in best_events or quality > best_events[group_key]["quality"]:
+                best_events[group_key] = candidate
+
+    for item in best_events.values():
+        e = Event()
+        e.name = build_title(
+            item["task_type"], item["flight_no"], item["dep"], item["arr"],
+            item["model"], item["reg"]
+        )
+        e.begin = item["start_dt"]
+        e.end = item["end_dt"]
+        e.description = build_description(
+            item["day_header"], item["task_type"], item["flight_no"],
+            item["dep"], item["arr"], item["model"], item["reg"],
+            item["start_time"], item["end_time"], item["checkin_time"],
+            item["checkin_place"], item["people_type"], item["people_lines"],
+            item["segment"]
+        )
+
+        bucket = task_bucket(item["task_type"])
+        calendars[bucket].events.add(e)
 
     mapping = {
         "flight": "flight.ics",
