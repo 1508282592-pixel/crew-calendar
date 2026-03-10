@@ -2,3 +2,4 @@ playwright
 pytesseract
 pillow
 ics
+requests
