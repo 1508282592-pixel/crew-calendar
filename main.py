@@ -39,6 +39,14 @@ AIRPORT_CN_TO_ICAO = {
 
 AIRPORT_NAMES = sorted(AIRPORT_CN_TO_ICAO.keys(), key=len, reverse=True)
 
+# =========================
+# 正则常量
+# =========================
+FLIGHT_NO_RE = re.compile(r"9C\d{3,4}[A-Z]?")
+REG_MODEL_RE = re.compile(r"^B[0-9A-Z]{4,5}A(?:319|320|321)$")
+REG_AND_MODEL_RE = re.compile(r"\b(B[0-9A-Z]{4,5})(A319|A320|A321)\b")
+REG_ONLY_RE = re.compile(r"\bB[0-9A-Z]{4,5}\b")
+
 
 # =========================
 # 基础工具
@@ -384,11 +392,11 @@ def extract_date(text: str):
 
 
 def is_flight_line(s: str) -> bool:
-    return re.fullmatch(r'9C\d{3,4}[A-Z]?', s) is not None
+    return FLIGHT_NO_RE.fullmatch(s) is not None
 
 
 def is_reg_model_line(s: str) -> bool:
-    return re.fullmatch(r'B\d{3,4}[A-Z]{0,2}A(319|320|321)', s) is not None
+    return REG_MODEL_RE.fullmatch(s) is not None
 
 
 def split_day_block_into_cards(day_block: str):
@@ -408,10 +416,7 @@ def split_day_block_into_cards(day_block: str):
         line1 = lines[i]
         line2 = lines[i + 1]
 
-        is_flight = re.fullmatch(r"9C\d{3,4}[A-Z]?", line1) is not None
-        is_reg_model = re.fullmatch(r"B\d{3,4}[A-Z]{0,2}A(?:319|320|321)", line2) is not None
-
-        if is_flight and is_reg_model:
+        if is_flight_line(line1) and is_reg_model_line(line2):
             starts.append(i)
 
     cards = []
@@ -444,22 +449,22 @@ def split_day_block_into_cards(day_block: str):
 def extract_flight_no(card_text: str) -> str:
     lines = [normalize_text(x) for x in card_text.splitlines() if normalize_text(x)]
     for line in lines:
-        if re.fullmatch(r'9C\d{3,4}[A-Z]?', line):
+        if is_flight_line(line):
             return line
 
-    m = re.search(r'\b9C\d{3,4}[A-Z]?\b', card_text)
+    m = FLIGHT_NO_RE.search(card_text)
     return m.group(0) if m else ""
 
 
 def extract_reg_and_model(card_text: str):
-    m = re.search(r'\b(B\d{3,4}[A-Z]{0,2})(A319|A320|A321)\b', card_text)
+    m = REG_AND_MODEL_RE.search(card_text)
     if m:
         return m.group(1), m.group(2)
 
     reg = ""
     model = ""
 
-    m_reg = re.search(r'\bB\d{3,4}[A-Z]{0,2}\b', card_text)
+    m_reg = REG_ONLY_RE.search(card_text)
     if m_reg:
         reg = m_reg.group(0)
 
@@ -541,9 +546,9 @@ def extract_people_lines(card_text: str):
 
         if "航班动态" in line:
             continue
-        if re.fullmatch(r'9C\d{3,4}[A-Z]?', line):
+        if is_flight_line(line):
             continue
-        if re.fullmatch(r'B\d{3,4}[A-Z]{0,2}A(319|320|321)', line):
+        if is_reg_model_line(line):
             continue
         if re.search(r'\d{2}:\d{2}', line):
             continue
