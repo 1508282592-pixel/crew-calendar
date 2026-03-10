@@ -2,6 +2,7 @@ import os
 import re
 import io
 import base64
+from itertools import product
 from datetime import datetime, timedelta
 
 from PIL import Image, ImageOps, ImageFilter
@@ -19,15 +20,8 @@ PASSWORD = os.environ["PASSWORD"]
 def normalize_candidate(text: str) -> str:
     text = text.upper()
     text = re.sub(r"[^A-Z0-9]", "", text)
-
-    # 常见 OCR 混淆修正
-    text = text.replace("O", "0") if re.search(r"\d", text) else text
-    text = text.replace("I", "1") if re.search(r"\d", text) else text
-
-    # 优先处理最常见情况：多识别了 1 个字符
     if len(text) == 5:
         text = text[:4]
-
     return text
 
 
@@ -43,9 +37,40 @@ def score_candidate(text: str) -> int:
         score += 40
     else:
         score += 10
-
     score += sum(ch.isalnum() for ch in text)
     return score
+
+
+def expand_char_options(ch: str):
+    mapping = {
+        "0": ["0", "O"],
+        "O": ["O", "0"],
+        "1": ["1", "I", "L"],
+        "I": ["I", "1", "L"],
+        "L": ["L", "1", "I"],
+        "5": ["5", "S"],
+        "S": ["S", "5"],
+        "8": ["8", "B"],
+        "B": ["B", "8"],
+        "2": ["2", "Z"],
+        "Z": ["Z", "2"],
+        "6": ["6", "G"],
+        "G": ["G", "6"],
+        "3": ["3", "B"],
+    }
+    return mapping.get(ch, [ch])
+
+
+def generate_code_candidates(code: str, limit: int = 12):
+    pools = [expand_char_options(ch) for ch in code]
+    all_codes = []
+    for combo in product(*pools):
+        cand = "".join(combo)
+        if cand not in all_codes:
+            all_codes.append(cand)
+        if len(all_codes) >= limit:
+            break
+    return all_codes
 
 
 def extract_captcha_bytes(page) -> bytes:
@@ -69,21 +94,17 @@ def build_variants(img_bytes: bytes):
 
     variants = []
 
-    # 原图放大
     variants.append(img.resize((img.width * 3, img.height * 3)))
 
-    # 多阈值二值化
     for threshold in [140, 155, 170, 185]:
         bw = img.point(lambda x: 255 if x > threshold else 0, mode="1")
         bw = bw.resize((bw.width * 3, bw.height * 3))
         variants.append(bw)
 
-    # 反色试一次
     inv = ImageOps.invert(img)
     inv = inv.resize((inv.width * 3, inv.height * 3))
     variants.append(inv)
 
-    # 去噪锐化
     sharp = img.filter(ImageFilter.SHARPEN)
     sharp = sharp.resize((sharp.width * 3, sharp.height * 3))
     variants.append(sharp)
@@ -123,10 +144,7 @@ def solve_captcha(page) -> str:
         return ""
 
     candidates = sorted(candidates, key=score_candidate, reverse=True)
-    best = candidates[0]
-
-    # 最终再裁成 4 位
-    best = best[:4]
+    best = candidates[0][:4]
 
     print("captcha best:", best)
     return best
@@ -136,6 +154,10 @@ def fill_login_form(page, code: str):
     inputs = page.locator("input")
     if inputs.count() < 3:
         raise RuntimeError("登录页输入框数量异常")
+
+    inputs.nth(0).fill("")
+    inputs.nth(1).fill("")
+    inputs.nth(2).fill("")
 
     inputs.nth(0).fill(USERNAME)
     inputs.nth(1).fill(PASSWORD)
@@ -148,25 +170,39 @@ def login(page, max_retries: int = 8):
 
     for attempt in range(1, max_retries + 1):
         try:
-            code = solve_captcha(page)
+            best_code = solve_captcha(page)
 
-            if len(code) != 4:
-                print(f"第 {attempt} 次验证码长度异常: {code}")
+            if len(best_code) != 4:
+                print(f"第 {attempt} 次验证码长度异常: {best_code}")
                 page.goto(LOGIN_URL, wait_until="domcontentloaded")
                 page.wait_for_timeout(2500)
                 continue
 
-            fill_login_form(page, code)
-            page.click("text=Login")
-            page.wait_for_timeout(5000)
+            candidates = generate_code_candidates(best_code, limit=12)
+            print("captcha candidates:", candidates)
 
-            body_text = page.locator("body").inner_text(timeout=5000)
+            for cand in candidates:
+                try:
+                    fill_login_form(page, cand)
+                    page.click("text=Login")
+                    page.wait_for_timeout(3500)
 
-            if ("统一认证中心" not in body_text) and ("Login" not in body_text):
-                print(f"登录成功，attempt={attempt}")
-                return
+                    body_text = page.locator("body").inner_text(timeout=5000)
 
-            print(f"第 {attempt} 次登录疑似失败，准备重试")
+                    if ("统一认证中心" not in body_text) and ("Login" not in body_text):
+                        print(f"登录成功，attempt={attempt}, code={cand}")
+                        return
+
+                    print(f"候选验证码失败: {cand}")
+                    page.goto(LOGIN_URL, wait_until="domcontentloaded")
+                    page.wait_for_timeout(2500)
+
+                except Exception as inner_e:
+                    print(f"候选验证码异常 {cand}: {inner_e}")
+                    page.goto(LOGIN_URL, wait_until="domcontentloaded")
+                    page.wait_for_timeout(2500)
+
+            print(f"第 {attempt} 次所有候选均失败，准备刷新验证码重试")
             page.goto(LOGIN_URL, wait_until="domcontentloaded")
             page.wait_for_timeout(2500)
 
