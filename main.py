@@ -4,6 +4,7 @@ import io
 import base64
 from itertools import product
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageOps, ImageFilter
 import pytesseract
@@ -18,6 +19,8 @@ PASSWORD = os.environ["PASSWORD"]
 
 ARTIFACT_DIR = "debug_output"
 os.makedirs(ARTIFACT_DIR, exist_ok=True)
+
+SH_TZ = ZoneInfo("Asia/Shanghai")
 
 
 def normalize_candidate(text: str) -> str:
@@ -314,12 +317,12 @@ def extract_date(day_block: str):
     m = re.search(r'(\d{2})月(\d{2})日', day_block)
     if not m:
         return None
-    return datetime.now().year, int(m.group(1)), int(m.group(2))
+    return datetime.now(SH_TZ).year, int(m.group(1)), int(m.group(2))
 
 
 def make_datetime(year, month, day, hhmm):
     hh, mm = map(int, hhmm.split(":"))
-    return datetime(year, month, day, hh, mm)
+    return datetime(year, month, day, hh, mm, tzinfo=SH_TZ)
 
 
 def split_segments(day_block: str):
@@ -373,16 +376,12 @@ def extract_reg_and_model(segment: str):
     return reg, model
 
 
-def extract_all_times(segment: str):
-    return re.findall(r'\b\d{2}:\d{2}\b', segment)
-
-
 def extract_start_end_time(segment: str):
     m = re.search(r'([^\s]+)[^\n]*?(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})', segment)
     if m:
         return m.group(2), m.group(3)
 
-    times = extract_all_times(segment)
+    times = re.findall(r'\b\d{2}:\d{2}\b', segment)
     if len(times) >= 2:
         return times[-2], times[-1]
 
@@ -437,6 +436,8 @@ def build_title(task_type, flight_no, dep, arr, model, reg):
 
     if flight_no and dep and arr:
         title = f"{icon} {flight_no} {dep}→{arr}"
+    elif dep and arr:
+        title = f"{icon} {task_type} {dep}→{arr}"
     elif flight_no:
         title = f"{icon} {flight_no} {task_type}"
     else:
@@ -492,8 +493,6 @@ def create_multi_calendars(day_blocks):
         "other": Calendar(),
     }
 
-    now = datetime.now()
-    created = 0
     seen = set()
 
     for day_block in day_blocks:
@@ -505,7 +504,7 @@ def create_multi_calendars(day_blocks):
 
         segments = split_segments(day_block)
 
-        for idx, seg in enumerate(segments):
+        for seg in segments:
             flight_no = extract_flight_no(seg)
             dep, arr = extract_airports(seg)
             reg, model = extract_reg_and_model(seg)
@@ -514,20 +513,32 @@ def create_multi_calendars(day_blocks):
             people_type = extract_people_type(seg)
             people_lines = extract_people_lines(seg)
 
-            dedup_key = (task_type, flight_no, dep, arr, start_time, end_time)
+            if not (date_info and start_time and end_time):
+                continue
+
+            year, month, day = date_info
+            start_dt = make_datetime(year, month, day, start_time)
+            end_dt = make_datetime(year, month, day, end_time)
+
+            if end_dt <= start_dt:
+                end_dt += timedelta(days=1)
+
+            if not flight_no and not (dep and arr):
+                continue
+
+            dedup_key = (
+                task_type,
+                flight_no,
+                dep,
+                arr,
+                reg,
+                model,
+                start_dt.isoformat(),
+                end_dt.isoformat(),
+            )
             if dedup_key in seen:
                 continue
             seen.add(dedup_key)
-
-            if date_info and start_time and end_time:
-                year, month, day = date_info
-                start_dt = make_datetime(year, month, day, start_time)
-                end_dt = make_datetime(year, month, day, end_time)
-                if end_dt <= start_dt:
-                    end_dt += timedelta(days=1)
-            else:
-                start_dt = now + timedelta(days=1, hours=created)
-                end_dt = start_dt + timedelta(hours=1)
 
             e = Event()
             e.name = build_title(task_type, flight_no, dep, arr, model, reg)
@@ -541,17 +552,6 @@ def create_multi_calendars(day_blocks):
 
             bucket = task_bucket(task_type)
             calendars[bucket].events.add(e)
-            created += 1
-
-    if created == 0:
-        e = Event()
-        start = now + timedelta(days=1)
-        start = start.replace(hour=20, minute=0, second=0, microsecond=0)
-        e.name = "🗂 未解析到任务"
-        e.begin = start
-        e.end = start + timedelta(hours=1)
-        e.description = "脚本已运行，但未解析到任务。"
-        calendars["other"].events.add(e)
 
     mapping = {
         "flight": "flight.ics",
