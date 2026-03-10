@@ -126,7 +126,6 @@ def solve_captcha(page) -> str:
     ]
 
     candidates = []
-
     for variant in variants:
         for cfg in configs:
             raw = pytesseract.image_to_string(variant, config=cfg)
@@ -201,8 +200,8 @@ def normalize_text(text: str) -> str:
     return text.strip()
 
 
-def extract_date(day_block: str):
-    m = re.search(r'(\d{2})月(\d{2})日', day_block)
+def extract_date(text: str):
+    m = re.search(r'(\d{2})月(\d{2})日', text)
     if not m:
         return None
     return datetime.now(SH_TZ).year, int(m.group(1)), int(m.group(2))
@@ -242,19 +241,126 @@ def detect_icon(task_type: str) -> str:
     }.get(task_type, "🗂")
 
 
+def get_task_header_lines(page):
+    body = page.locator("body")
+    text = body.inner_text()
+    lines = []
+    for line in text.splitlines():
+        line = line.strip()
+        if re.search(r"\d{2}月\d{2}日\s*周.", line):
+            lines.append(line)
+
+    seen = set()
+    out = []
+    for x in lines:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
+
+
+def collect_day_entries_one_by_one(page):
+    """
+    一天一条展开，一天一条收起。
+    返回每一天展开后的完整文本块。
+    """
+    day_entries = []
+    header_lines = get_task_header_lines(page)
+
+    for idx, header in enumerate(header_lines):
+        try:
+            row = page.locator(f"text={header}").first
+            box = row.bounding_box()
+            if not box:
+                continue
+
+            x = box["x"] + box["width"] - 28
+            y = box["y"] + box["height"] / 2
+
+            page.mouse.click(x, y)
+            page.wait_for_timeout(1200)
+
+            full_text = normalize_text(page.locator("body").inner_text())
+            start = full_text.find(header)
+            if start == -1:
+                page.mouse.click(x, y)
+                page.wait_for_timeout(800)
+                continue
+
+            if idx + 1 < len(header_lines):
+                next_header = header_lines[idx + 1]
+                end = full_text.find(next_header, start + len(header))
+                block = full_text[start:end].strip() if end != -1 else full_text[start:].strip()
+            else:
+                block = full_text[start:].strip()
+
+            day_entries.append(block)
+
+            page.mouse.click(x, y)
+            page.wait_for_timeout(800)
+
+        except Exception:
+            pass
+
+    save_text("day_entries.txt", "\n\n==========\n\n".join(day_entries))
+    return day_entries
+
+
+def split_day_entry_into_segments(day_entry: str):
+    """
+    把一天里展开出来的多航段内容按航班号拆成多个独立段。
+    每段都保留当天标题。
+    """
+    lines = [x.strip() for x in day_entry.splitlines() if x.strip()]
+    if not lines:
+        return []
+
+    header = lines[0]
+    segments = []
+    current = None
+
+    for line in lines[1:]:
+        if re.fullmatch(r'9C\d{3,4}[A-Z]?', line):
+            if current:
+                segments.append(current)
+            current = [header, line]
+        else:
+            if current is not None:
+                current.append(line)
+
+    if current:
+        segments.append(current)
+
+    out = []
+    for seg_lines in segments:
+        seg_text = "\n".join(seg_lines)
+        if re.search(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', seg_text):
+            out.append(seg_text)
+
+    return out
+
+
 def extract_flight_no(segment: str) -> str:
+    for line in segment.splitlines():
+        line = line.strip()
+        if re.fullmatch(r'9C\d{3,4}[A-Z]?', line):
+            return line
     m = re.search(r'\b9C\d{3,4}[A-Z]?\b', segment)
     return m.group(0) if m else ""
 
 
 def extract_airports(segment: str):
+    m_cn = re.search(r'([\u4e00-\u9fff]{2,10})\s*([\u4e00-\u9fff]{2,10})\s*(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})', segment)
     codes = re.findall(r'\b[A-Z]{4}\b', segment)
+
     uniq = []
     for c in codes:
         if c not in uniq:
             uniq.append(c)
+
     if len(uniq) >= 2:
         return uniq[0], uniq[1]
+
     return "", ""
 
 
@@ -318,7 +424,7 @@ def extract_people_lines(segment: str):
 
         if "航班动态" in line:
             continue
-        if re.search(r'\b9C\d', line):
+        if re.fullmatch(r'9C\d{3,4}[A-Z]?', line):
             continue
         if re.search(r'\b[A-Z]{4}\b', line):
             continue
@@ -408,77 +514,7 @@ def event_quality(flight_no, dep, arr, reg, model, checkin_time, checkin_place, 
     return score
 
 
-def get_task_header_lines(page):
-    body = page.locator("body")
-    text = body.inner_text()
-    lines = []
-    for line in text.splitlines():
-        line = line.strip()
-        if re.search(r"\d{2}月\d{2}日\s*周.", line):
-            lines.append(line)
-    # 去重保持顺序
-    seen = set()
-    out = []
-    for x in lines:
-        if x not in seen:
-            seen.add(x)
-            out.append(x)
-    return out
-
-
-def collect_expanded_tasks_one_by_one(page):
-    """
-    逐条展开 -> 读取 -> 收起
-    避免多个任务同时展开导致内容混在一起
-    """
-    task_entries = []
-    header_lines = get_task_header_lines(page)
-
-    for idx, header in enumerate(header_lines):
-        try:
-            row = page.locator(f"text={header}").first
-            box = row.bounding_box()
-            if not box:
-                continue
-
-            x = box["x"] + box["width"] - 28
-            y = box["y"] + box["height"] / 2
-
-            # 展开
-            page.mouse.click(x, y)
-            page.wait_for_timeout(1200)
-
-            full_text = normalize_text(page.locator("body").inner_text())
-
-            # 从当前header开始，截到下一个header前
-            start = full_text.find(header)
-            if start == -1:
-                # 收起后继续
-                page.mouse.click(x, y)
-                page.wait_for_timeout(800)
-                continue
-
-            if idx + 1 < len(header_lines):
-                next_header = header_lines[idx + 1]
-                end = full_text.find(next_header, start + len(header))
-                block = full_text[start:end].strip() if end != -1 else full_text[start:].strip()
-            else:
-                block = full_text[start:].strip()
-
-            task_entries.append(block)
-
-            # 收起
-            page.mouse.click(x, y)
-            page.wait_for_timeout(800)
-
-        except Exception:
-            pass
-
-    save_text("task_entries.txt", "\n\n==========\n\n".join(task_entries))
-    return task_entries
-
-
-def create_multi_calendars(task_entries):
+def create_multi_calendars(day_entries):
     calendars = {
         "flight": Calendar(),
         "positioning": Calendar(),
@@ -489,63 +525,68 @@ def create_multi_calendars(task_entries):
 
     best_events = {}
 
-    for entry in task_entries:
-        task_type = detect_task_type(entry)
-        date_info = extract_date(entry)
-        header_line = entry.splitlines()[0] if entry.splitlines() else ""
-        day_header = header_line
-
-        flight_no = extract_flight_no(entry)
-        dep, arr = extract_airports(entry)
-        reg, model = extract_reg_and_model(entry)
-        start_time, end_time = extract_start_end_time(entry)
-        checkin_time, checkin_place = extract_checkin(entry)
-        people_type = extract_people_type(entry)
-        people_lines = extract_people_lines(entry)
-
-        if not date_info or not flight_no or not start_time or not end_time:
+    for day_entry in day_entries:
+        task_type = detect_task_type(day_entry)
+        date_info = extract_date(day_entry)
+        if not date_info:
             continue
 
-        year, month, day = date_info
-        start_dt = make_datetime(year, month, day, start_time)
-        end_dt = make_datetime(year, month, day, end_time)
+        header_line = day_entry.splitlines()[0] if day_entry.splitlines() else ""
+        day_header = header_line
 
-        if end_dt <= start_dt:
-            end_dt += timedelta(days=1)
+        segments = split_day_entry_into_segments(day_entry)
 
-        group_key = (
-            task_type,
-            flight_no,
-            start_dt.isoformat(),
-            end_dt.isoformat(),
-        )
+        for seg in segments:
+            flight_no = extract_flight_no(seg)
+            dep, arr = extract_airports(seg)
+            reg, model = extract_reg_and_model(seg)
+            start_time, end_time = extract_start_end_time(seg)
+            checkin_time, checkin_place = extract_checkin(seg)
+            people_type = extract_people_type(seg)
+            people_lines = extract_people_lines(seg)
 
-        quality = event_quality(
-            flight_no, dep, arr, reg, model, checkin_time, checkin_place, people_lines
-        )
+            if not flight_no or not start_time or not end_time:
+                continue
 
-        candidate = {
-            "task_type": task_type,
-            "flight_no": flight_no,
-            "dep": dep,
-            "arr": arr,
-            "reg": reg,
-            "model": model,
-            "start_dt": start_dt,
-            "end_dt": end_dt,
-            "start_time": start_time,
-            "end_time": end_time,
-            "checkin_time": checkin_time,
-            "checkin_place": checkin_place,
-            "people_type": people_type,
-            "people_lines": people_lines,
-            "day_header": day_header,
-            "entry": entry,
-            "quality": quality,
-        }
+            year, month, day = date_info
+            start_dt = make_datetime(year, month, day, start_time)
+            end_dt = make_datetime(year, month, day, end_time)
+            if end_dt <= start_dt:
+                end_dt += timedelta(days=1)
 
-        if group_key not in best_events or quality > best_events[group_key]["quality"]:
-            best_events[group_key] = candidate
+            group_key = (
+                task_type,
+                flight_no,
+                start_dt.isoformat(),
+                end_dt.isoformat(),
+            )
+
+            quality = event_quality(
+                flight_no, dep, arr, reg, model, checkin_time, checkin_place, people_lines
+            )
+
+            candidate = {
+                "task_type": task_type,
+                "flight_no": flight_no,
+                "dep": dep,
+                "arr": arr,
+                "reg": reg,
+                "model": model,
+                "start_dt": start_dt,
+                "end_dt": end_dt,
+                "start_time": start_time,
+                "end_time": end_time,
+                "checkin_time": checkin_time,
+                "checkin_place": checkin_place,
+                "people_type": people_type,
+                "people_lines": people_lines,
+                "day_header": day_header,
+                "segment": seg,
+                "quality": quality,
+            }
+
+            if group_key not in best_events or quality > best_events[group_key]["quality"]:
+                best_events[group_key] = candidate
 
     for item in best_events.values():
         e = Event()
@@ -560,7 +601,7 @@ def create_multi_calendars(task_entries):
             item["dep"], item["arr"], item["model"], item["reg"],
             item["start_time"], item["end_time"], item["checkin_time"],
             item["checkin_place"], item["people_type"], item["people_lines"],
-            item["entry"]
+            item["segment"]
         )
 
         bucket = task_bucket(item["task_type"])
@@ -587,8 +628,8 @@ def run():
         login(page, max_retries=8)
         open_mission_page(page)
 
-        task_entries = collect_expanded_tasks_one_by_one(page)
-        create_multi_calendars(task_entries)
+        day_entries = collect_day_entries_one_by_one(page)
+        create_multi_calendars(day_entries)
 
         browser.close()
 
