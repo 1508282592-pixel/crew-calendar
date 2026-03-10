@@ -127,12 +127,7 @@ def solve_captcha(page) -> str:
 
     candidates = []
 
-    for idx, variant in enumerate(variants):
-        try:
-            variant.save(os.path.join(ARTIFACT_DIR, f"captcha_variant_{idx}.png"))
-        except Exception:
-            pass
-
+    for variant in variants:
         for cfg in configs:
             raw = pytesseract.image_to_string(variant, config=cfg)
             cleaned = normalize_candidate(raw)
@@ -327,7 +322,8 @@ def make_datetime(year, month, day, hhmm):
 
 def split_segments(day_block: str):
     """
-    只保留真正详细航段，过滤摘要块。
+    宽松版：只要从 9C 航班号开始，就切成一个候选段。
+    后面再做去重，不在这里过度过滤。
     """
     positions = list(re.finditer(r'\b9C\d{3,4}[A-Z]?\b', day_block))
     if not positions:
@@ -338,11 +334,7 @@ def split_segments(day_block: str):
         start = m.start()
         end = positions[i + 1].start() if i + 1 < len(positions) else len(day_block)
         seg = day_block[start:end].strip()
-
-        airports = re.findall(r'\b[A-Z]{4}\b', seg)
-        time_ranges = re.findall(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', seg)
-
-        if len(airports) >= 2 and len(time_ranges) >= 1:
+        if len(seg) > 5:
             segments.append(seg)
 
     return segments
@@ -384,9 +376,9 @@ def extract_reg_and_model(segment: str):
 
 
 def extract_start_end_time(segment: str):
-    m = re.search(r'([^\s]+)[^\n]*?(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})', segment)
+    m = re.search(r'(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})', segment)
     if m:
-        return m.group(2), m.group(3)
+        return m.group(1), m.group(2)
 
     times = re.findall(r'\b\d{2}:\d{2}\b', segment)
     if len(times) >= 2:
@@ -505,7 +497,6 @@ def create_multi_calendars(day_blocks):
     for day_block in day_blocks:
         task_type = detect_task_type(day_block)
         date_info = extract_date(day_block)
-
         header_line = day_block.splitlines()[0] if day_block.splitlines() else ""
         day_header = header_line
 
@@ -520,18 +511,23 @@ def create_multi_calendars(day_blocks):
             people_type = extract_people_type(seg)
             people_lines = extract_people_lines(seg)
 
-            if not (date_info and start_time and end_time):
+            if not date_info:
                 continue
 
-            if not flight_no or not (dep and arr):
+            if not flight_no:
                 continue
 
+            # 允许先生成事件，哪怕航线暂时没抓全
             year, month, day = date_info
-            start_dt = make_datetime(year, month, day, start_time)
-            end_dt = make_datetime(year, month, day, end_time)
 
-            if end_dt <= start_dt:
-                end_dt += timedelta(days=1)
+            if start_time and end_time:
+                start_dt = make_datetime(year, month, day, start_time)
+                end_dt = make_datetime(year, month, day, end_time)
+                if end_dt <= start_dt:
+                    end_dt += timedelta(days=1)
+            else:
+                # 没抓到时间就跳过，避免生成乱时间的事件
+                continue
 
             dedup_key = (
                 task_type,
