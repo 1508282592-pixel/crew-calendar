@@ -16,18 +16,15 @@ def solve_captcha(page):
 
     if img and img.startswith("data:image"):
         base64_data = img.split(",")[1]
-
         img_bytes = base64.b64decode(base64_data)
 
         with open("captcha.jpg", "wb") as f:
             f.write(img_bytes)
 
         image = Image.open("captcha.jpg")
-
         code = pytesseract.image_to_string(image)
 
         code = code.strip().replace(" ", "")
-
         print("captcha:", code)
 
         return code
@@ -41,12 +38,19 @@ def login(page):
 
     page.wait_for_timeout(5000)
 
-    page.fill('input[name="username"]', USERNAME)
-    page.fill('input[name="password"]', PASSWORD)
+    inputs = page.locator("input")
 
+    # 第1个输入框 用户名
+    inputs.nth(0).fill(USERNAME)
+
+    # 第2个输入框 密码
+    inputs.nth(1).fill(PASSWORD)
+
+    # 获取验证码
     code = solve_captcha(page)
 
-    page.fill('input[name="validcode"]', code)
+    # 第3个输入框 验证码
+    inputs.nth(2).fill(code)
 
     page.click("text=Login")
 
@@ -62,7 +66,6 @@ def create_calendar():
     e.name = "Crew Schedule Sync"
 
     e.begin = datetime.now()
-
     e.end = datetime.now() + timedelta(hours=1)
 
     e.description = "Auto generated schedule"
@@ -70,7 +73,6 @@ def create_calendar():
     c.events.add(e)
 
     with open("crew_schedule.ics", "w") as f:
-
         f.writelines(c)
 
 
