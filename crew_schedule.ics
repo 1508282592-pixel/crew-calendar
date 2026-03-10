@@ -2,10 +2,10 @@ BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:ics.py - http://git.io/lLljaA
 BEGIN:VEVENT
-DESCRIPTION:任务类型：任务\n\n原始内容：\n首页\n我的任务\n个人中心\n飞行信息\n文件通告\n飞行互评\n意见反馈\n退出\n 段洋硕\n English Version\n搜索\n取消\n意见反馈\n图片\n涉及功能 \n提交\n常见问题\n所有反馈\n我的反馈\n\n我的手机号码信息有误，最新的号码18516246912\n\n注意\n\n请输入反馈内容!\n\n确认
-DTEND:20260311T081941Z
-DTSTART:20260311T071941Z
-SUMMARY:🗂 任务
-UID:f1fa2b0e-81f9-4943-a33c-b640447bb8fa@f1fa.org
+DESCRIPTION:任务类型：航班\n航班号：9C8947\n航线：ZSSS → ZLXY\n机型：A321\n签到时间：17:15\n任务时间：14:25 - 17:15\n\n原始内容：\n首页\n我的任务\n个人中心\n飞行信息\n文件通告\n飞行互评\n意见反馈\n退出\n 段洋硕\n English Version\n返回\n按起降地\n按航班号\n按机号\n \n \n \n查询\n9C8947\nB30FZ\nA321\n14:25 上海虹桥 (ZSSS)\n西安咸阳 (ZLXY) 17:15\n9C8948\n9C8918\n起降信息\n机场信息\n航线信息\n飞机信息\n机组/旅客信息\n调整信息\n出港\n计划起飞\n14:25\n预计起飞\n14:25\n实际起飞\nCOBT\nCTOT\n机位号\n登机口\n航站楼\nT1\n关舱门\n撤轮档\n进港\n计划降落\n17:15\n预计降落\n17:15\n实际降落\n挡轮挡\n开舱门\n机位号\n航站楼\nT5
+DTEND:20260311T083437Z
+DTSTART:20260311T073437Z
+SUMMARY:✈️ 9C8947 ZSSS→ZLXY\nA321
+UID:29f07418-1a38-477f-b1e9-6cc75c6ec7c5@29f0.org
 END:VEVENT
 END:VCALENDAR
