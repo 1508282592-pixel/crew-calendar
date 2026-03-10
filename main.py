@@ -259,12 +259,35 @@ def open_mission_page(page):
     for i in range(3):
         try:
             page.goto(MISSION_URL, wait_until="domcontentloaded", timeout=90000)
-            page.wait_for_timeout(8000)
-            return
+            page.wait_for_timeout(5000)
+
+            # 强制点击“我的任务”
+            try:
+                page.locator("text=我的任务").first.click(timeout=5000)
+                page.wait_for_timeout(3000)
+            except Exception:
+                pass
+
+            # 如果误进意见反馈弹层，尝试关掉
+            try:
+                if page.locator("text=意见反馈").count() > 0 and page.locator("text=确认").count() > 0:
+                    # 先按 Esc
+                    page.keyboard.press("Escape")
+                    page.wait_for_timeout(1000)
+            except Exception:
+                pass
+
+            # 再次确认页面里出现任务日期
+            body_text = page.locator("body").inner_text()
+            if re.search(r"\d{2}月\d{2}日\s*周.", body_text):
+                return
+
         except Exception:
             if i == 2:
                 raise
             page.wait_for_timeout(5000)
+
+    raise RuntimeError("未能进入任务列表页")
 
 
 def get_day_headers(page):
@@ -792,7 +815,16 @@ def run():
         page.set_default_navigation_timeout(90000)
 
         login(page, max_retries=8)
+
+        # 登录后保存一次页面，便于排查
+        page.screenshot(path=os.path.join(ARTIFACT_DIR, "after_login.png"), full_page=True)
+        save_text("after_login.txt", page.locator("body").inner_text())
+
         open_mission_page(page)
+
+        # 进入任务页后再保存一次
+        page.screenshot(path=os.path.join(ARTIFACT_DIR, "mission_page_ready.png"), full_page=True)
+        save_text("mission_body_text.txt", page.locator("body").inner_text())
 
         day_blocks = collect_day_blocks(page)
         create_multi_calendars_from_blocks(day_blocks)
