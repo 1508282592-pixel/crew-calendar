@@ -2,11 +2,11 @@ BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Crew Calendar//CN
 BEGIN:VEVENT
-UID:置位-9C8947-20260313T142500-20260313T171500@crew-calendar
+UID:置位-9C8947-20260313T090500-20260313T224000@crew-calendar
 SUMMARY:📍 9C8947 ZSSS→ZLXY
-DTSTART;TZID=Asia/Shanghai:20260313T142500
-DTEND;TZID=Asia/Shanghai:20260313T171500
-DESCRIPTION:03月13日 周五 置位 14:25- 17:15\n航班号：9C8947\n航线：ZSSS → ZLXY\n航线：上海虹桥 → 西安咸阳\n签到时间：12:40\n签到地点：上海虹桥\n任务时间：14:25 - 17:15\n机型：A321\n注册号：B321F\n\n人员名单：\n杨刚(T\,R)钱俊(R)鲍国际(R)\n许晓君(B)\n李嘉臣段洋硕陈佳琪\n\n航班追踪：https://www.flightradar24.com/data/flights/9C8947\n机号信息：https://www.flightradar24.com/data/aircraft/B321F
+DTSTART;TZID=Asia/Shanghai:20260313T090500
+DTEND;TZID=Asia/Shanghai:20260313T224000
+DESCRIPTION:03月13日 周五 置位 14:25- 17:15\n航班号：9C8947\n航线：ZSSS → ZLXY\n签到时间：12:40\n签到地点：上海虹桥\n任务时间：09:05 - 22:40\n机型：A321\n注册号：B321F\n\n人员名单：\n杨刚(T\,R)钱俊(R)鲍国际(R)\n许晓君(B)\n李嘉臣段洋硕陈佳琪\n\n航班追踪：https://www.flightradar24.com/data/flights/9C8947\n机号信息：https://www.flightradar24.com/data/aircraft/B321F
 BEGIN:VALARM
 TRIGGER:-PT90M
 DESCRIPTION:签到提醒
