@@ -198,7 +198,10 @@ def login(page, max_retries: int = 8):
 
                     if ("统一认证中心" not in body_text) and ("Login" not in body_text):
                         print(f"登录成功，attempt={attempt}, code={cand}")
-                        page.screenshot(path=os.path.join(ARTIFACT_DIR, "after_login.png"), full_page=True)
+                        page.screenshot(
+                            path=os.path.join(ARTIFACT_DIR, "after_login.png"),
+                            full_page=True
+                        )
                         save_text("after_login.txt", body_text)
                         return
 
@@ -226,42 +229,52 @@ def login(page, max_retries: int = 8):
 def open_mission_page(page):
     page.goto(MISSION_URL, wait_until="domcontentloaded")
     page.wait_for_timeout(8000)
-    page.screenshot(path=os.path.join(ARTIFACT_DIR, "mission_page_before_expand.png"), full_page=True)
+    page.screenshot(
+        path=os.path.join(ARTIFACT_DIR, "mission_page_before_expand.png"),
+        full_page=True
+    )
 
 
 def expand_task_rows_only(page):
     """
-    只在右侧任务区域里找展开箭头，避免点到顶部菜单“意见反馈”等图标
+    只点击任务列表每一行最右侧的小圆展开箭头
+    避免误点“航班动态”或顶部菜单
     """
-    # 任务区在页面右半部分
-    right_half = page.locator("body").locator("xpath=.//*").filter(
-        has_text=re.compile(r"\d{2}月\d{2}日")
-    )
+    page.wait_for_timeout(2000)
 
-    # 先尝试直接点所有含日期的行末按钮/图标
-    count = right_half.count()
-    print("task-like row count:", count)
+    body = page.locator("body")
+    text = body.inner_text()
 
-    for i in range(count):
+    lines = []
+    for line in text.splitlines():
+        line = line.strip()
+        if re.search(r"\d{2}月\d{2}日\s*周.", line):
+            lines.append(line)
+
+    print("task header lines:", lines)
+
+    for line in lines:
         try:
-            row = right_half.nth(i)
-            # 行里常见可点元素
-            for selector in ["button", "svg", "i", "[class*='arrow']", "[class*='icon']"]:
-                try:
-                    items = row.locator(selector)
-                    for j in range(items.count()):
-                        try:
-                            items.nth(j).click(timeout=800)
-                            page.wait_for_timeout(200)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-        except Exception:
-            pass
+            row = page.locator(f"text={line}").first
+            box = row.bounding_box()
+            if not box:
+                continue
+
+            x = box["x"] + box["width"] - 28
+            y = box["y"] + box["height"] / 2
+
+            print(f"click expand arrow for row: {line}, x={x}, y={y}")
+            page.mouse.click(x, y)
+            page.wait_for_timeout(800)
+
+        except Exception as e:
+            print(f"expand row failed: {line}, err={e}")
 
     page.wait_for_timeout(3000)
-    page.screenshot(path=os.path.join(ARTIFACT_DIR, "mission_page_after_expand.png"), full_page=True)
+    page.screenshot(
+        path=os.path.join(ARTIFACT_DIR, "mission_page_after_expand.png"),
+        full_page=True
+    )
 
 
 def normalize_text(text: str) -> str:
@@ -277,7 +290,8 @@ def extract_task_area_text(page) -> str:
     text = normalize_text(text)
     save_text("mission_body_text.txt", text)
 
-    markers = ["01月", "02月", "03月", "04月", "05月", "06月", "07月", "08月", "09月", "10月", "11月", "12月"]
+    markers = ["01月", "02月", "03月", "04月", "05月", "06月",
+               "07月", "08月", "09月", "10月", "11月", "12月"]
     start_idx = -1
     for marker in markers:
         idx = text.find(marker)
@@ -417,7 +431,8 @@ def build_title(task_type, flight_no, dep, arr, model, reg):
     return title
 
 
-def build_description(block, task_type, flight_no, dep, arr, model, reg, start_time, end_time, checkin_time):
+def build_description(block, task_type, flight_no, dep, arr, model, reg,
+                      start_time, end_time, checkin_time):
     lines = []
     lines.append(f"任务类型：{task_type}")
     if flight_no:
