@@ -158,12 +158,10 @@ def build_variants(img_bytes: bytes):
         bw = bw.resize((bw.width * 3, bw.height * 3))
         variants.append(bw)
 
-    inv = ImageOps.invert(img)
-    inv = inv.resize((img.width * 3, img.height * 3))
+    inv = ImageOps.invert(img).resize((img.width * 3, img.height * 3))
     variants.append(inv)
 
-    sharp = img.filter(ImageFilter.SHARPEN)
-    sharp = sharp.resize((img.width * 3, img.height * 3))
+    sharp = img.filter(ImageFilter.SHARPEN).resize((img.width * 3, img.height * 3))
     variants.append(sharp)
 
     return variants
@@ -261,23 +259,19 @@ def open_mission_page(page):
             page.goto(MISSION_URL, wait_until="domcontentloaded", timeout=90000)
             page.wait_for_timeout(5000)
 
-            # 强制点击“我的任务”
             try:
                 page.locator("text=我的任务").first.click(timeout=5000)
                 page.wait_for_timeout(3000)
             except Exception:
                 pass
 
-            # 如果误进意见反馈弹层，尝试关掉
             try:
                 if page.locator("text=意见反馈").count() > 0 and page.locator("text=确认").count() > 0:
-                    # 先按 Esc
                     page.keyboard.press("Escape")
                     page.wait_for_timeout(1000)
             except Exception:
                 pass
 
-            # 再次确认页面里出现任务日期
             body_text = page.locator("body").inner_text()
             if re.search(r"\d{2}月\d{2}日\s*周.", body_text):
                 return
@@ -350,7 +344,7 @@ def get_day_block(page, header: str, next_header: str | None):
 
 
 # =========================
-# 识别每张详细卡
+# 任务识别
 # =========================
 
 def detect_task_type(text: str) -> str:
@@ -397,38 +391,50 @@ def is_reg_model_line(s: str) -> bool:
     return re.fullmatch(r'B\d{3,4}[A-Z]{0,2}A(319|320|321)', s) is not None
 
 
-def run():
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        context = browser.new_context(
-            viewport={"width": 1400, "height": 1000},
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/122.0.0.0 Safari/537.36"
-            )
-        )
-        page = context.new_page()
-        page.set_default_timeout(90000)
-        page.set_default_navigation_timeout(90000)
+def split_day_block_into_cards(day_block: str):
+    """
+    真实结构：
+    9C8946
+    B32EFA321
+    07:10 西安咸阳 航班动态
+    西安咸阳上海虹桥 09:05- 11:10
+    """
+    lines = [normalize_text(x) for x in day_block.splitlines() if normalize_text(x)]
+    if not lines:
+        return []
 
-        login(page, max_retries=8)
+    starts = []
+    for i in range(len(lines) - 1):
+        line1 = lines[i]
+        line2 = lines[i + 1]
 
-        # 登录后保存一次页面，便于排查
-        page.screenshot(path=os.path.join(ARTIFACT_DIR, "after_login.png"), full_page=True)
-        save_text("after_login.txt", page.locator("body").inner_text())
+        is_flight = re.fullmatch(r"9C\d{3,4}[A-Z]?", line1) is not None
+        is_reg_model = re.fullmatch(r"B\d{3,4}[A-Z]{0,2}A(?:319|320|321)", line2) is not None
 
-        open_mission_page(page)
+        if is_flight and is_reg_model:
+            starts.append(i)
 
-        # 进入任务页后再保存一次
-        page.screenshot(path=os.path.join(ARTIFACT_DIR, "mission_page_ready.png"), full_page=True)
-        save_text("mission_body_text.txt", page.locator("body").inner_text())
+    cards = []
+    for idx, start_i in enumerate(starts):
+        end_i = starts[idx + 1] if idx + 1 < len(starts) else len(lines)
+        chunk_lines = lines[start_i:end_i]
+        chunk = "\n".join(chunk_lines).strip()
 
-        day_blocks = collect_day_blocks(page)
-        create_multi_calendars_from_blocks(day_blocks)
+        if "航班动态" not in chunk:
+            continue
+        if not re.search(r"\d{2}:\d{2}\s*-\s*\d{2}:\d{2}", chunk):
+            continue
 
-        context.close()
-        browser.close()
+        cards.append(chunk)
+
+    uniq = []
+    seen = set()
+    for c in cards:
+        if c not in seen:
+            seen.add(c)
+            uniq.append(c)
+
+    return uniq
 
 
 # =========================
@@ -558,7 +564,7 @@ def extract_people_lines(card_text: str):
 
 
 # =========================
-# 生成 ICS
+# ICS 输出
 # =========================
 
 def build_title(task_type, flight_no, dep, arr, dep_cn, arr_cn):
@@ -679,7 +685,7 @@ def event_quality(item: dict) -> int:
 
 
 # =========================
-# 主逻辑
+# 主流程
 # =========================
 
 def collect_day_blocks(page):
@@ -808,13 +814,11 @@ def run():
 
         login(page, max_retries=8)
 
-        # 登录后保存一次页面，便于排查
         page.screenshot(path=os.path.join(ARTIFACT_DIR, "after_login.png"), full_page=True)
         save_text("after_login.txt", page.locator("body").inner_text())
 
         open_mission_page(page)
 
-        # 进入任务页后再保存一次
         page.screenshot(path=os.path.join(ARTIFACT_DIR, "mission_page_ready.png"), full_page=True)
         save_text("mission_body_text.txt", page.locator("body").inner_text())
 
