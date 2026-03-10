@@ -31,6 +31,9 @@ AIRPORT_CN_TO_ICAO = {
     "济南遥墙": "ZSJN",
     "哈尔滨太平": "ZYHB",
     "淮安涟水": "ZSSH",
+    "呼和浩特白塔": "ZBHH",
+    "长春龙嘉": "ZYCC",
+    "兰州中川": "ZLLL",
 }
 
 AIRPORT_NAMES = sorted(AIRPORT_CN_TO_ICAO.keys(), key=len, reverse=True)
@@ -69,6 +72,10 @@ def make_datetime(year: int, month: int, day: int, hhmm: str) -> datetime:
     hh, mm = map(int, hhmm.split(":"))
     return datetime(year, month, day, hh, mm, tzinfo=SH_TZ)
 
+
+# =========================
+# 验证码
+# =========================
 
 def normalize_candidate(text: str) -> str:
     text = text.upper()
@@ -182,6 +189,10 @@ def solve_captcha(page) -> str:
     return candidates[0][:4]
 
 
+# =========================
+# 登录
+# =========================
+
 def fill_login_form(page, code: str):
     inputs = page.locator("input")
     if inputs.count() < 3:
@@ -238,6 +249,10 @@ def login(page, max_retries: int = 8):
     raise RuntimeError("多次尝试后仍无法登录")
 
 
+# =========================
+# 页面采集
+# =========================
+
 def open_mission_page(page):
     for i in range(3):
         try:
@@ -250,66 +265,123 @@ def open_mission_page(page):
             page.wait_for_timeout(5000)
 
 
-def get_task_header_lines(page):
-    body = page.locator("body")
-    text = body.inner_text()
-    lines = []
+def get_day_headers(page):
+    text = page.locator("body").inner_text()
+    headers = []
     for line in text.splitlines():
         line = line.strip()
         if re.search(r"\d{2}月\d{2}日\s*周.", line):
-            lines.append(line)
+            headers.append(line)
 
     seen = set()
     out = []
-    for x in lines:
-        if x not in seen:
-            seen.add(x)
-            out.append(x)
+    for h in headers:
+        if h not in seen:
+            seen.add(h)
+            out.append(h)
     return out
 
 
-def collect_day_entries_one_by_one(page):
-    day_entries = []
-    header_lines = get_task_header_lines(page)
+def expand_day(page, header: str):
+    row = page.locator(f"text={header}").first
+    box = row.bounding_box()
+    if not box:
+        return False
 
-    for idx, header in enumerate(header_lines):
-        try:
-            row = page.locator(f"text={header}").first
-            box = row.bounding_box()
-            if not box:
-                continue
+    x = box["x"] + box["width"] - 28
+    y = box["y"] + box["height"] / 2
+    page.mouse.click(x, y)
+    page.wait_for_timeout(1500)
+    return True
 
-            x = box["x"] + box["width"] - 28
-            y = box["y"] + box["height"] / 2
 
-            page.mouse.click(x, y)
-            page.wait_for_timeout(1200)
+def collapse_day(page, header: str):
+    try:
+        row = page.locator(f"text={header}").first
+        box = row.bounding_box()
+        if not box:
+            return
 
-            full_text = normalize_text(page.locator("body").inner_text())
-            start = full_text.find(header)
-            if start == -1:
-                page.mouse.click(x, y)
-                page.wait_for_timeout(800)
-                continue
+        x = box["x"] + box["width"] - 28
+        y = box["y"] + box["height"] / 2
+        page.mouse.click(x, y)
+        page.wait_for_timeout(800)
+    except Exception:
+        pass
 
-            if idx + 1 < len(header_lines):
-                next_header = header_lines[idx + 1]
-                end = full_text.find(next_header, start + len(header))
-                block = full_text[start:end].strip() if end != -1 else full_text[start:].strip()
-            else:
-                block = full_text[start:].strip()
 
-            day_entries.append(block)
+def collect_day_cards(page, day_header: str):
+    """
+    直接按卡片节点采集，不再用整天大文本切段。
+    候选卡片条件：
+    - 有航班号 9Cxxxx
+    - 有航班动态
+    - 有本段时间 xx:xx-xx:xx
+    """
+    js = """
+    (dayHeader) => {
+      function norm(s) {
+        return (s || '').replace(/\\u00a0/g, ' ').replace(/[ \\t]+/g, ' ').trim();
+      }
 
-            page.mouse.click(x, y)
-            page.wait_for_timeout(800)
+      const nodes = Array.from(document.querySelectorAll('div, li, section, article, td, tr'));
+      const candidates = [];
 
-        except Exception:
-            pass
+      for (const el of nodes) {
+        const text = norm(el.innerText || '');
+        if (!text) continue;
+        if (!/9C\\d{3,4}[A-Z]?/.test(text)) continue;
+        if (!/航班动态/.test(text)) continue;
+        if (!/\\d{2}:\\d{2}\\s*-\\s*\\d{2}:\\d{2}/.test(text)) continue;
 
-    save_text("day_entries.txt", "\n\n==========\n\n".join(day_entries))
-    return day_entries
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 150 || rect.height < 60) continue;
 
+        candidates.push({
+          text,
+          top: rect.top,
+          left: rect.left,
+          width: rect.width,
+          height: rect.height,
+          html: el.outerHTML ? el.outerHTML.slice(0, 5000) : ''
+        });
+      }
+
+      // 去掉包含关系里的大容器，尽量保留最小卡片
+      const filtered = candidates.filter((a, idx) => {
+        return !candidates.some((b, jdx) => {
+          if (idx === jdx) return false;
+          const bContainsA = b.text.length > a.text.length && b.text.includes(a.text);
+          const bMuchBigger = b.height >= a.height && b.width >= a.width;
+          return bContainsA && bMuchBigger;
+        });
+      });
+
+      // 再按文本去重
+      const seen = new Set();
+      const unique = [];
+      for (const item of filtered.sort((a, b) => a.top - b.top || a.left - b.left)) {
+        const key = item.text;
+        if (!seen.has(key)) {
+          seen.add(key);
+          unique.push(item);
+        }
+      }
+
+      return unique;
+    }
+    """
+    cards = page.evaluate(js, day_header)
+    save_text(
+        f"cards_{re.sub(r'[^0-9A-Za-z]+', '_', day_header)}.txt",
+        "\n\n==========\n\n".join([c["text"] for c in cards])
+    )
+    return cards
+
+
+# =========================
+# 解析
+# =========================
 
 def detect_task_type(text: str) -> str:
     for t in ["置位", "航班", "训练", "摆渡", "备份", "待命", "考勤"]:
@@ -347,114 +419,37 @@ def extract_date(text: str):
     return datetime.now(SH_TZ).year, int(m.group(1)), int(m.group(2))
 
 
-def is_flight_line(line: str) -> bool:
-    return re.fullmatch(r'9C\d{3,4}[A-Z]?', line.strip()) is not None
-
-
-def looks_like_start_line(line: str) -> bool:
-    line = line.strip()
-    patterns = [
-        r'^9C\d{3,4}[A-Z]?\s*$',
-        r'^9C\d{3,4}[A-Z]?\s+B\d{3,4}[A-Z]{0,2}\s*\|\s*A3\d{2}\s*$',
-        r'^9C\d{3,4}[A-Z]?\s+B\d{3,4}[A-Z]{0,2}\s+A3\d{2}\s*$',
-        r'^9C\d{3,4}[A-Z]?B\d{3,4}[A-Z]{0,2}A3\d{2}\s*$',
-    ]
-    return any(re.fullmatch(p, line) for p in patterns)
-
-
-def is_reg_model_line(line: str) -> bool:
-    line = line.strip()
-    patterns = [
-        r'^B\d{3,4}[A-Z]{0,2}A3\d{2}$',
-        r'^B\d{3,4}[A-Z]{0,2}\s*\|\s*A3\d{2}$',
-        r'^B\d{3,4}[A-Z]{0,2}\s+A3\d{2}$',
-    ]
-    return any(re.fullmatch(p, line) for p in patterns)
-
-
-def split_day_entry_into_detailed_segments(day_entry: str):
-    lines = [x.strip() for x in day_entry.splitlines() if x.strip()]
-    if not lines:
-        return []
-
-    header = lines[0]
-    starts = []
-
-    for i in range(1, len(lines)):
-        line = lines[i]
-
-        if i + 1 < len(lines) and is_flight_line(line) and is_reg_model_line(lines[i + 1]):
-            starts.append(i)
-            continue
-
-        if looks_like_start_line(line):
-            starts.append(i)
-
-    starts = sorted(set(starts))
-
-    segments = []
-    for idx, start_i in enumerate(starts):
-        end_i = starts[idx + 1] if idx + 1 < len(starts) else len(lines)
-        seg_lines = [header] + lines[start_i:end_i]
-        seg_text = "\n".join(seg_lines)
-
-        has_flight_dynamic = "航班动态" in seg_text
-        has_range = re.search(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', seg_text) is not None
-
-        if has_flight_dynamic and has_range:
-            segments.append(seg_text)
-
-    return segments
-
-
-def extract_flight_no(segment: str) -> str:
-    for line in segment.splitlines():
-        line = line.strip()
-        if is_flight_line(line):
-            return line
-
-        m = re.match(r'(9C\d{3,4}[A-Z]?)', line)
-        if m:
-            return m.group(1)
-
-    m = re.search(r'\b9C\d{3,4}[A-Z]?\b', segment)
+def extract_flight_no(card_text: str) -> str:
+    m = re.search(r'\b9C\d{3,4}[A-Z]?\b', card_text)
     return m.group(0) if m else ""
 
 
-def extract_reg_and_model(segment: str):
+def extract_reg_and_model(card_text: str):
     patterns = [
-        r'(B\d{3,4}[A-Z]{0,2})(A3\d{2})',
-        r'(B\d{3,4}[A-Z]{0,2})\s*\|\s*(A3\d{2})',
-        r'(B\d{3,4}[A-Z]{0,2})\s+(A3\d{2})',
+        r'\b(B\d{3,4}[A-Z]{0,2})\s*\|\s*(A3\d{2})\b',
+        r'\b(B\d{3,4}[A-Z]{0,2})\s+(A3\d{2})\b',
+        r'\b(B\d{3,4}[A-Z]{0,2})(A3\d{2})\b',
     ]
     for p in patterns:
-        m = re.search(p, segment)
+        m = re.search(p, card_text)
         if m:
             return m.group(1), m.group(2)
 
-    reg = ""
-    model = ""
+    m_reg = re.search(r'\bB\d{3,4}[A-Z]{0,2}\b', card_text)
+    m_model = re.search(r'\b(A319|A320|A321)\b', card_text)
 
-    m_reg = re.search(r'\bB\d{3,4}[A-Z]{0,2}\b', segment)
-    if m_reg:
-        reg = m_reg.group(0)
-
-    m_model = re.search(r'\b(A319|A320|A321|B300X|B321F|B737|B738|B739)\b', segment)
-    if m_model:
-        model = m_model.group(0)
-
-    return reg, model
+    return (m_reg.group(0) if m_reg else "", m_model.group(0) if m_model else "")
 
 
-def extract_checkin(segment: str):
-    m = re.search(r'(\d{2}:\d{2})\s*([^\s]+)\s*航班动态', segment)
+def extract_checkin(card_text: str):
+    m = re.search(r'(\d{2}:\d{2})\s*([^\s]+)\s*航班动态', card_text)
     if m:
         return m.group(1), m.group(2)
     return "", ""
 
 
-def extract_start_end_time(segment: str):
-    ranges = re.findall(r'(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})', segment)
+def extract_start_end_time(card_text: str):
+    ranges = re.findall(r'(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})', card_text)
     if ranges:
         return ranges[-1][0], ranges[-1][1]
     return "", ""
@@ -462,20 +457,21 @@ def extract_start_end_time(segment: str):
 
 def parse_route_cn_from_line(line: str):
     line = re.sub(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', '', line).strip()
+    line = line.replace("→", "").replace("-", "").replace("—", "")
     for dep_cn in AIRPORT_NAMES:
         if line.startswith(dep_cn):
-            remain = line[len(dep_cn):]
+            remain = line[len(dep_cn):].strip()
             for arr_cn in AIRPORT_NAMES:
                 if remain == arr_cn:
                     return dep_cn, arr_cn
     return "", ""
 
 
-def extract_airports(segment: str):
+def extract_airports(card_text: str):
     dep_cn = ""
     arr_cn = ""
 
-    lines = [x.strip() for x in segment.splitlines() if x.strip()]
+    lines = [x.strip() for x in card_text.splitlines() if x.strip()]
     candidate_lines = []
     for line in lines:
         if re.search(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', line) and "航班动态" not in line:
@@ -490,7 +486,7 @@ def extract_airports(segment: str):
     if dep and arr:
         return dep, arr, dep_cn, arr_cn
 
-    codes = re.findall(r'\b[A-Z]{4}\b', segment)
+    codes = re.findall(r'\b[A-Z]{4}\b', card_text)
     uniq = []
     for c in codes:
         if c not in uniq:
@@ -501,11 +497,11 @@ def extract_airports(segment: str):
     return "", "", dep_cn, arr_cn
 
 
-def extract_people_lines(segment: str):
-    lines = [x.strip() for x in segment.splitlines() if x.strip()]
+def extract_people_lines(card_text: str):
+    lines = [x.strip() for x in card_text.splitlines() if x.strip()]
     out = []
-
     capture = False
+
     for line in lines:
         if line in ["随机人员", "乘务长", "副驾驶", "机长"]:
             capture = True
@@ -516,7 +512,7 @@ def extract_people_lines(segment: str):
 
         if "航班动态" in line:
             continue
-        if is_flight_line(line):
+        if re.search(r'\b9C\d{3,4}[A-Z]?\b', line):
             continue
         if re.search(r'\b[A-Z]{4}\b', line):
             continue
@@ -539,6 +535,10 @@ def extract_people_lines(segment: str):
             uniq.append(x)
     return uniq
 
+
+# =========================
+# 事件模板
+# =========================
 
 def build_title(task_type, flight_no, dep, arr, dep_cn, arr_cn):
     icon = detect_icon(task_type)
@@ -606,7 +606,7 @@ def build_vevent(item: dict) -> str:
         f'{format_dt_local(item["end_dt"])}@crew-calendar'
     )
 
-    lines = [
+    return "\n".join([
         "BEGIN:VEVENT",
         f"UID:{uid}",
         f"SUMMARY:{escape_ics_text(title)}",
@@ -619,8 +619,7 @@ def build_vevent(item: dict) -> str:
         "ACTION:DISPLAY",
         "END:VALARM",
         "END:VEVENT",
-    ]
-    return "\n".join(lines)
+    ])
 
 
 def write_calendar(filename: str, items: list[dict]):
@@ -629,10 +628,8 @@ def write_calendar(filename: str, items: list[dict]):
         "VERSION:2.0",
         "PRODID:-//Crew Calendar//CN",
     ]
-
     for item in items:
         content.append(build_vevent(item))
-
     content.append("END:VCALENDAR")
 
     with open(filename, "w", encoding="utf-8") as f:
@@ -660,7 +657,11 @@ def event_quality(item: dict) -> int:
     return score
 
 
-def create_multi_calendars(day_entries):
+# =========================
+# 生成日历
+# =========================
+
+def create_multi_calendars_from_page(page):
     buckets = {
         "flight": [],
         "positioning": [],
@@ -671,68 +672,77 @@ def create_multi_calendars(day_entries):
 
     best_events = {}
 
-    for day_entry in day_entries:
-        task_type = detect_task_type(day_entry)
-        date_info = extract_date(day_entry)
-        if not date_info:
+    day_headers = get_day_headers(page)
+    save_text("day_headers.txt", "\n".join(day_headers))
+
+    for day_header in day_headers:
+        if not expand_day(page, day_header):
             continue
 
-        header_line = day_entry.splitlines()[0] if day_entry.splitlines() else ""
-        day_header = header_line
-        segments = split_day_entry_into_detailed_segments(day_entry)
-
-        for seg in segments:
-            flight_no = extract_flight_no(seg)
-            reg, model = extract_reg_and_model(seg)
-            start_time, end_time = extract_start_end_time(seg)
-            checkin_time, checkin_place = extract_checkin(seg)
-            dep, arr, dep_cn, arr_cn = extract_airports(seg)
-            people_lines = extract_people_lines(seg)
-
-            if not flight_no or not start_time or not end_time:
+        try:
+            task_type = detect_task_type(day_header)
+            date_info = extract_date(day_header)
+            if not date_info:
+                collapse_day(page, day_header)
                 continue
 
-            year, month, day = date_info
-            start_dt = make_datetime(year, month, day, start_time)
-            end_dt = make_datetime(year, month, day, end_time)
-            if end_dt <= start_dt:
-                end_dt += timedelta(days=1)
+            cards = collect_day_cards(page, day_header)
 
-            item = {
-                "day_header": day_header,
-                "task_type": task_type,
-                "flight_no": flight_no,
-                "dep": dep,
-                "arr": arr,
-                "dep_cn": dep_cn,
-                "arr_cn": arr_cn,
-                "start_time": start_time,
-                "end_time": end_time,
-                "checkin_time": checkin_time,
-                "checkin_place": checkin_place,
-                "model": model,
-                "reg": reg,
-                "people_lines": people_lines,
-                "start_dt": start_dt,
-                "end_dt": end_dt,
-            }
+            for card in cards:
+                card_text = normalize_text(card["text"])
+                flight_no = extract_flight_no(card_text)
+                reg, model = extract_reg_and_model(card_text)
+                start_time, end_time = extract_start_end_time(card_text)
+                checkin_time, checkin_place = extract_checkin(card_text)
+                dep, arr, dep_cn, arr_cn = extract_airports(card_text)
+                people_lines = extract_people_lines(card_text)
 
-            group_key = (
-                task_type,
-                flight_no,
-                start_dt.isoformat(),
-                end_dt.isoformat(),
-            )
+                if not flight_no or not start_time or not end_time:
+                    continue
 
-            q = event_quality(item)
-            item["quality"] = q
+                year, month, day = date_info
+                start_dt = make_datetime(year, month, day, start_time)
+                end_dt = make_datetime(year, month, day, end_time)
+                if end_dt <= start_dt:
+                    end_dt += timedelta(days=1)
 
-            if group_key not in best_events or q > best_events[group_key]["quality"]:
-                best_events[group_key] = item
+                item = {
+                    "day_header": day_header,
+                    "task_type": task_type,
+                    "flight_no": flight_no,
+                    "dep": dep,
+                    "arr": arr,
+                    "dep_cn": dep_cn,
+                    "arr_cn": arr_cn,
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "checkin_time": checkin_time,
+                    "checkin_place": checkin_place,
+                    "model": model,
+                    "reg": reg,
+                    "people_lines": people_lines,
+                    "start_dt": start_dt,
+                    "end_dt": end_dt,
+                }
+
+                group_key = (
+                    task_type,
+                    flight_no,
+                    start_dt.isoformat(),
+                    end_dt.isoformat(),
+                )
+
+                q = event_quality(item)
+                item["quality"] = q
+
+                if group_key not in best_events or q > best_events[group_key]["quality"]:
+                    best_events[group_key] = item
+
+        finally:
+            collapse_day(page, day_header)
 
     for item in best_events.values():
-        bucket = task_bucket(item["task_type"])
-        buckets[bucket].append(item)
+        buckets[task_bucket(item["task_type"])].append(item)
 
     for key in buckets:
         buckets[key].sort(key=lambda x: (x["start_dt"], x["flight_no"]))
@@ -743,6 +753,10 @@ def create_multi_calendars(day_entries):
     write_calendar("ferry.ics", buckets["ferry"])
     write_calendar("other.ics", buckets["other"])
 
+
+# =========================
+# 主流程
+# =========================
 
 def run():
     with sync_playwright() as p:
@@ -762,8 +776,7 @@ def run():
         login(page, max_retries=8)
         open_mission_page(page)
 
-        day_entries = collect_day_entries_one_by_one(page)
-        create_multi_calendars(day_entries)
+        create_multi_calendars_from_page(page)
 
         context.close()
         browser.close()
