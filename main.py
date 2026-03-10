@@ -11,7 +11,6 @@ PASSWORD = os.environ["PASSWORD"]
 
 
 def solve_captcha(page):
-
     img = page.locator("img").nth(0).get_attribute("src")
 
     if img and img.startswith("data:image"):
@@ -23,52 +22,54 @@ def solve_captcha(page):
 
         image = Image.open("captcha.jpg")
         code = pytesseract.image_to_string(image)
-
-        code = code.strip().replace(" ", "")
-        print("captcha:", code)
-
-        return code
+        return code.strip().replace(" ", "")
 
     return ""
 
 
 def login(page):
-
     page.goto("https://cp.9cair.com")
-
     page.wait_for_timeout(5000)
 
     inputs = page.locator("input")
-
-    # 第1个输入框 用户名
     inputs.nth(0).fill(USERNAME)
-
-    # 第2个输入框 密码
     inputs.nth(1).fill(PASSWORD)
 
-    # 获取验证码
     code = solve_captcha(page)
-
-    # 第3个输入框 验证码
     inputs.nth(2).fill(code)
 
     page.click("text=Login")
-
     page.wait_for_timeout(5000)
 
 
-def create_calendar():
+def open_my_tasks(page):
+    page.click("text=我的任务")
+    page.wait_for_timeout(3000)
+
+    # 点击所有展开箭头
+    arrows = page.locator("svg")  # 小箭头通常是svg图标
+    count = arrows.count()
+
+    for i in range(count):
+        try:
+            arrows.nth(i).click()
+        except:
+            pass
+
+    page.wait_for_timeout(2000)
+
+
+def create_calendar_from_page(page):
+
+    content = page.content()
 
     c = Calendar()
 
     e = Event()
-
-    e.name = "Crew Schedule Sync"
-
+    e.name = "Crew Schedule Loaded"
     e.begin = datetime.now()
     e.end = datetime.now() + timedelta(hours=1)
-
-    e.description = "Auto generated schedule"
+    e.description = "Successfully loaded My Tasks page"
 
     c.events.add(e)
 
@@ -77,16 +78,13 @@ def create_calendar():
 
 
 def run():
-
     with sync_playwright() as p:
-
         browser = p.chromium.launch()
-
         page = browser.new_page()
 
         login(page)
-
-        create_calendar()
+        open_my_tasks(page)
+        create_calendar_from_page(page)
 
         browser.close()
 
