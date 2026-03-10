@@ -46,19 +46,12 @@ def score_candidate(text: str) -> int:
 
 def expand_char_options(ch: str):
     mapping = {
-        "0": ["0", "O"],
-        "O": ["O", "0"],
-        "1": ["1", "I", "L"],
-        "I": ["I", "1", "L"],
-        "L": ["L", "1", "I"],
-        "5": ["5", "S"],
-        "S": ["S", "5"],
-        "8": ["8", "B"],
-        "B": ["B", "8"],
-        "2": ["2", "Z"],
-        "Z": ["Z", "2"],
-        "6": ["6", "G"],
-        "G": ["G", "6"],
+        "0": ["0", "O"], "O": ["O", "0"],
+        "1": ["1", "I", "L"], "I": ["I", "1", "L"], "L": ["L", "1", "I"],
+        "5": ["5", "S"], "S": ["S", "5"],
+        "8": ["8", "B"], "B": ["B", "8"],
+        "2": ["2", "Z"], "Z": ["Z", "2"],
+        "6": ["6", "G"], "G": ["G", "6"],
         "3": ["3", "B"],
     }
     return mapping.get(ch, [ch])
@@ -140,10 +133,8 @@ def solve_captcha(page) -> str:
         for cfg in configs:
             raw = pytesseract.image_to_string(variant, config=cfg)
             cleaned = normalize_candidate(raw)
-
             print("captcha raw:", repr(raw))
             print("captcha cleaned:", cleaned)
-
             if cleaned:
                 candidates.append(cleaned)
 
@@ -152,7 +143,6 @@ def solve_captcha(page) -> str:
 
     candidates = sorted(candidates, key=score_candidate, reverse=True)
     best = candidates[0][:4]
-
     print("captcha best:", best)
     print("captcha candidates:", generate_code_candidates(best, limit=12))
     return best
@@ -198,28 +188,16 @@ def login(page, max_retries: int = 8):
 
                     if ("统一认证中心" not in body_text) and ("Login" not in body_text):
                         print(f"登录成功，attempt={attempt}, code={cand}")
-                        page.screenshot(
-                            path=os.path.join(ARTIFACT_DIR, "after_login.png"),
-                            full_page=True
-                        )
-                        save_text("after_login.txt", body_text)
                         return
 
-                    print(f"候选验证码失败: {cand}")
                     page.goto(LOGIN_URL, wait_until="domcontentloaded")
                     page.wait_for_timeout(2500)
 
-                except Exception as inner_e:
-                    print(f"候选验证码异常 {cand}: {inner_e}")
+                except Exception:
                     page.goto(LOGIN_URL, wait_until="domcontentloaded")
                     page.wait_for_timeout(2500)
 
-            print(f"第 {attempt} 次所有候选均失败，准备刷新验证码重试")
-            page.goto(LOGIN_URL, wait_until="domcontentloaded")
-            page.wait_for_timeout(2500)
-
-        except Exception as e:
-            print(f"第 {attempt} 次登录异常: {e}")
+        except Exception:
             page.goto(LOGIN_URL, wait_until="domcontentloaded")
             page.wait_for_timeout(2500)
 
@@ -229,17 +207,10 @@ def login(page, max_retries: int = 8):
 def open_mission_page(page):
     page.goto(MISSION_URL, wait_until="domcontentloaded")
     page.wait_for_timeout(8000)
-    page.screenshot(
-        path=os.path.join(ARTIFACT_DIR, "mission_page_before_expand.png"),
-        full_page=True
-    )
+    page.screenshot(path=os.path.join(ARTIFACT_DIR, "mission_page_before_expand.png"), full_page=True)
 
 
 def expand_task_rows_only(page):
-    """
-    只点击任务列表每一行最右侧的小圆展开箭头
-    避免误点“航班动态”或顶部菜单
-    """
     page.wait_for_timeout(2000)
 
     body = page.locator("body")
@@ -271,10 +242,7 @@ def expand_task_rows_only(page):
             print(f"expand row failed: {line}, err={e}")
 
     page.wait_for_timeout(3000)
-    page.screenshot(
-        path=os.path.join(ARTIFACT_DIR, "mission_page_after_expand.png"),
-        full_page=True
-    )
+    page.screenshot(path=os.path.join(ARTIFACT_DIR, "mission_page_after_expand.png"), full_page=True)
 
 
 def normalize_text(text: str) -> str:
@@ -290,8 +258,7 @@ def extract_task_area_text(page) -> str:
     text = normalize_text(text)
     save_text("mission_body_text.txt", text)
 
-    markers = ["01月", "02月", "03月", "04月", "05月", "06月",
-               "07月", "08月", "09月", "10月", "11月", "12月"]
+    markers = ["01月", "02月", "03月", "04月", "05月", "06月", "07月", "08月", "09月", "10月", "11月", "12月"]
     start_idx = -1
     for marker in markers:
         idx = text.find(marker)
@@ -305,7 +272,7 @@ def extract_task_area_text(page) -> str:
     return text[start_idx:]
 
 
-def split_tasks(task_area_text: str):
+def split_day_blocks(task_area_text: str):
     pattern = r'(?=(\d{2}月\d{2}日\s*周.\s*(?:航班|置位|训练|摆渡|备份|待命|考勤|任务)))'
     parts = re.split(pattern, task_area_text)
 
@@ -355,6 +322,39 @@ def detect_icon(task_type: str) -> str:
     }.get(task_type, "🗂")
 
 
+def extract_date(block: str):
+    m = re.search(r'(\d{2})月(\d{2})日', block)
+    if not m:
+        return None
+    month = int(m.group(1))
+    day = int(m.group(2))
+    year = datetime.now().year
+    return year, month, day
+
+
+def make_datetime(year, month, day, hhmm):
+    hh, mm = map(int, hhmm.split(":"))
+    return datetime(year, month, day, hh, mm)
+
+
+def split_segments(day_block: str):
+    # 每个航段通常从航班号 9Cxxxx 开始
+    flight_positions = list(re.finditer(r'\b9C\d{3,4}[A-Z]?\b', day_block))
+    if not flight_positions:
+        return [day_block]
+
+    segments = []
+    for i, match in enumerate(flight_positions):
+        start = match.start()
+        end = flight_positions[i + 1].start() if i + 1 < len(flight_positions) else len(day_block)
+        seg = day_block[start:end].strip()
+        if len(seg) > 5:
+            segments.append(seg)
+
+    # 如果没有拆开成功，就返回原块
+    return segments or [day_block]
+
+
 def extract_flight_no(block: str) -> str:
     m = re.search(r'\b9C\d{3,4}[A-Z]?\b', block)
     return m.group(0) if m else ""
@@ -362,8 +362,12 @@ def extract_flight_no(block: str) -> str:
 
 def extract_airports(block: str):
     codes = re.findall(r'\b[A-Z]{4}\b', block)
-    if len(codes) >= 2:
-        return codes[0], codes[1]
+    uniq = []
+    for c in codes:
+        if c not in uniq:
+            uniq.append(c)
+    if len(uniq) >= 2:
+        return uniq[0], uniq[1]
     return "", ""
 
 
@@ -379,6 +383,13 @@ def extract_reg_and_model(block: str):
     if m_model:
         model = m_model.group(0)
 
+    # 像 B321FA321 这种黏连格式
+    if not reg or not model:
+        m_combo = re.search(r'(B\d{3,4}[A-Z]?)(A3\d{2})', block)
+        if m_combo:
+            reg = reg or m_combo.group(1)
+            model = model or m_combo.group(2)
+
     return reg, model
 
 
@@ -389,27 +400,17 @@ def extract_times(block: str):
     return "", "", times
 
 
-def extract_checkin_time(block: str, all_times):
-    if len(all_times) >= 3:
-        return all_times[-2]
-    if len(all_times) == 2:
-        return all_times[0]
-    return ""
+def extract_checkin(block: str):
+    # 先抓 “12:40 上海虹桥 航班动态”
+    m = re.search(r'(\d{2}:\d{2})\s+([^\s]+)\s+航班动态', block)
+    if m:
+        return m.group(1), m.group(2)
 
+    times = re.findall(r'\b\d{2}:\d{2}\b', block)
+    if len(times) >= 3:
+        return times[-2], ""
 
-def extract_date(block: str):
-    m = re.search(r'(\d{2})月(\d{2})日', block)
-    if not m:
-        return None
-    month = int(m.group(1))
-    day = int(m.group(2))
-    year = datetime.now().year
-    return year, month, day
-
-
-def make_datetime(year, month, day, hhmm):
-    hh, mm = map(int, hhmm.split(":"))
-    return datetime(year, month, day, hh, mm)
+    return "", ""
 
 
 def build_title(task_type, flight_no, dep, arr, model, reg):
@@ -431,9 +432,10 @@ def build_title(task_type, flight_no, dep, arr, model, reg):
     return title
 
 
-def build_description(block, task_type, flight_no, dep, arr, model, reg,
-                      start_time, end_time, checkin_time):
+def build_description(day_header, segment, task_type, flight_no, dep, arr, model, reg,
+                      start_time, end_time, checkin_time, checkin_place):
     lines = []
+    lines.append(f"日期：{day_header}")
     lines.append(f"任务类型：{task_type}")
     if flight_no:
         lines.append(f"航班号：{flight_no}")
@@ -445,36 +447,37 @@ def build_description(block, task_type, flight_no, dep, arr, model, reg,
         lines.append(f"注册号：{reg}")
     if checkin_time:
         lines.append(f"签到时间：{checkin_time}")
+    if checkin_place:
+        lines.append(f"签到地点：{checkin_place}")
     if start_time and end_time:
         lines.append(f"任务时间：{start_time} - {end_time}")
     lines.append("")
     lines.append("原始内容：")
-    lines.append(block)
+    lines.append(segment)
     return "\n".join(lines)
 
 
-def create_calendar_from_blocks(blocks):
+def create_calendar_from_blocks(day_blocks):
     c = Calendar()
     now = datetime.now()
 
-    if not blocks:
-        e = Event()
-        start = now + timedelta(days=1)
-        start = start.replace(hour=20, minute=0, second=0, microsecond=0)
-        e.name = "🗂 未解析到任务"
-        e.begin = start
-        e.end = start + timedelta(hours=1)
-        e.description = "脚本已运行，但未解析到任务块。请查看 debug_output。"
-        c.events.add(e)
-    else:
-        for idx, block in enumerate(blocks):
-            task_type = detect_task_type(block)
-            flight_no = extract_flight_no(block)
-            dep, arr = extract_airports(block)
-            reg, model = extract_reg_and_model(block)
-            start_time, end_time, all_times = extract_times(block)
-            checkin_time = extract_checkin_time(block, all_times)
-            date_info = extract_date(block)
+    created = 0
+
+    for day_block in day_blocks:
+        task_type = detect_task_type(day_block)
+        date_info = extract_date(day_block)
+
+        day_header_match = re.search(r'(\d{2}月\d{2}日\s*周.\s*\S+)', day_block)
+        day_header = day_header_match.group(1) if day_header_match else ""
+
+        segments = split_segments(day_block)
+
+        for idx, seg in enumerate(segments):
+            flight_no = extract_flight_no(seg)
+            dep, arr = extract_airports(seg)
+            reg, model = extract_reg_and_model(seg)
+            start_time, end_time, _all_times = extract_times(seg)
+            checkin_time, checkin_place = extract_checkin(seg)
 
             if date_info and start_time and end_time:
                 year, month, day = date_info
@@ -483,7 +486,7 @@ def create_calendar_from_blocks(blocks):
                 if end_dt <= start_dt:
                     end_dt += timedelta(days=1)
             else:
-                start_dt = now + timedelta(days=1, hours=idx)
+                start_dt = now + timedelta(days=1, hours=created)
                 end_dt = start_dt + timedelta(hours=1)
 
             e = Event()
@@ -491,10 +494,21 @@ def create_calendar_from_blocks(blocks):
             e.begin = start_dt
             e.end = end_dt
             e.description = build_description(
-                block, task_type, flight_no, dep, arr, model, reg,
-                start_time, end_time, checkin_time
+                day_header, seg, task_type, flight_no, dep, arr,
+                model, reg, start_time, end_time, checkin_time, checkin_place
             )
             c.events.add(e)
+            created += 1
+
+    if created == 0:
+        e = Event()
+        start = now + timedelta(days=1)
+        start = start.replace(hour=20, minute=0, second=0, microsecond=0)
+        e.name = "🗂 未解析到任务"
+        e.begin = start
+        e.end = start + timedelta(hours=1)
+        e.description = "脚本已运行，但未解析到任务。"
+        c.events.add(e)
 
     with open("crew_schedule.ics", "w", encoding="utf-8") as f:
         f.writelines(c)
@@ -510,8 +524,8 @@ def run():
         expand_task_rows_only(page)
 
         task_area_text = extract_task_area_text(page)
-        blocks = split_tasks(task_area_text)
-        create_calendar_from_blocks(blocks)
+        day_blocks = split_day_blocks(task_area_text)
+        create_calendar_from_blocks(day_blocks)
 
         browser.close()
 
