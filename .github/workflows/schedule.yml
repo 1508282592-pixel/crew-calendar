@@ -1,31 +1,35 @@
 name: crew-calendar
 
-permissions:
-  contents: write
-
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 10 * * *"
-    - cron: "0 11 * * *"
+    - cron: '0 10 * * *'
+    - cron: '0 11 * * *'
 
 jobs:
   run:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v3
 
       - name: Install Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: '3.10'
 
-      - run: pip install -r requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
-      - run: playwright install
+      - name: Install Playwright
+        run: playwright install
 
-      - run: python main.py
+      - name: Run script
+        run: python main.py
+        env:
+          USERNAME: ${{ secrets.USERNAME }}
+          PASSWORD: ${{ secrets.PASSWORD }}
 
       - name: Commit calendar
         run: |
