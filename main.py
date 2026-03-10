@@ -36,10 +36,6 @@ AIRPORT_CN_TO_ICAO = {
 AIRPORT_NAMES = sorted(AIRPORT_CN_TO_ICAO.keys(), key=len, reverse=True)
 
 
-# =========================
-# 基础工具
-# =========================
-
 def normalize_text(text: str) -> str:
     text = text.replace("\u00a0", " ")
     text = re.sub(r"\r", "", text)
@@ -73,10 +69,6 @@ def make_datetime(year: int, month: int, day: int, hhmm: str) -> datetime:
     hh, mm = map(int, hhmm.split(":"))
     return datetime(year, month, day, hh, mm, tzinfo=SH_TZ)
 
-
-# =========================
-# 验证码
-# =========================
 
 def normalize_candidate(text: str) -> str:
     text = text.upper()
@@ -190,10 +182,6 @@ def solve_captcha(page) -> str:
     return candidates[0][:4]
 
 
-# =========================
-# 登录
-# =========================
-
 def fill_login_form(page, code: str):
     inputs = page.locator("input")
     if inputs.count() < 3:
@@ -249,10 +237,6 @@ def login(page, max_retries: int = 8):
 
     raise RuntimeError("多次尝试后仍无法登录")
 
-
-# =========================
-# 页面采集
-# =========================
 
 def open_mission_page(page):
     for i in range(3):
@@ -327,10 +311,6 @@ def collect_day_entries_one_by_one(page):
     return day_entries
 
 
-# =========================
-# 解析
-# =========================
-
 def detect_task_type(text: str) -> str:
     for t in ["置位", "航班", "训练", "摆渡", "备份", "待命", "考勤"]:
         if t in text:
@@ -392,7 +372,7 @@ def split_day_entry_into_detailed_segments(day_entry: str):
     for seg_lines in segments:
         seg_text = "\n".join(seg_lines)
         has_flight_dynamic = "航班动态" in seg_text
-        has_reg_model = re.search(r'B\d{3,4}[A-Z]?A3\d{2}', seg_text) is not None
+        has_reg_model = re.search(r'B\d{3,4}[A-Z]{0,2}A3\d{2}', seg_text) is not None
         has_range = re.search(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', seg_text) is not None
 
         if has_flight_dynamic and has_reg_model and has_range:
@@ -411,14 +391,14 @@ def extract_flight_no(segment: str) -> str:
 
 
 def extract_reg_and_model(segment: str):
-    m_combo = re.search(r'(B\d{3,4}[A-Z]?)(A3\d{2})', segment)
+    m_combo = re.search(r'(B\d{3,4}[A-Z]{0,2})(A3\d{2})', segment)
     if m_combo:
         return m_combo.group(1), m_combo.group(2)
 
     reg = ""
     model = ""
 
-    m_reg = re.search(r'\bB\d{3,4}[A-Z]?\b', segment)
+    m_reg = re.search(r'\bB\d{3,4}[A-Z]{0,2}\b', segment)
     if m_reg:
         reg = m_reg.group(0)
 
@@ -484,13 +464,6 @@ def extract_airports(segment: str):
     return "", "", dep_cn, arr_cn
 
 
-def extract_people_type(segment: str):
-    for t in ["随机人员", "乘务长", "副驾驶", "机长"]:
-        if t in segment:
-            return t
-    return ""
-
-
 def extract_people_lines(segment: str):
     lines = [x.strip() for x in segment.splitlines() if x.strip()]
     out = []
@@ -530,10 +503,6 @@ def extract_people_lines(segment: str):
     return uniq
 
 
-# =========================
-# 事件模板
-# =========================
-
 def build_title(task_type, flight_no, dep, arr, dep_cn, arr_cn):
     icon = detect_icon(task_type)
 
@@ -551,7 +520,6 @@ def build_description(item: dict) -> str:
 
     lines = []
     lines.append(f"日期：{item['day_header']}")
-    lines.append(f"任务类型：{item['task_type']}")
     lines.append(f"航班号：{item['flight_no']}")
 
     if item["dep"] or item["arr"]:
@@ -571,11 +539,8 @@ def build_description(item: dict) -> str:
     if item["reg"]:
         lines.append(f"注册号：{item['reg']}")
 
-    if item["people_type"]:
-        lines.append("")
-        lines.append(f"人员类型：{item['people_type']}")
-
     if item["people_lines"]:
+        lines.append("")
         lines.append("人员名单：")
         for p in item["people_lines"]:
             lines.append(p)
@@ -637,10 +602,6 @@ def write_calendar(filename: str, items: list[dict]):
         f.write("\n".join(content))
 
 
-# =========================
-# 事件生成
-# =========================
-
 def event_quality(item: dict) -> int:
     score = 0
     if item["flight_no"]:
@@ -689,7 +650,6 @@ def create_multi_calendars(day_entries):
             start_time, end_time = extract_start_end_time(seg)
             checkin_time, checkin_place = extract_checkin(seg)
             dep, arr, dep_cn, arr_cn = extract_airports(seg)
-            people_type = extract_people_type(seg)
             people_lines = extract_people_lines(seg)
 
             if not flight_no or not start_time or not end_time:
@@ -715,7 +675,6 @@ def create_multi_calendars(day_entries):
                 "checkin_place": checkin_place,
                 "model": model,
                 "reg": reg,
-                "people_type": people_type,
                 "people_lines": people_lines,
                 "start_dt": start_dt,
                 "end_dt": end_dt,
@@ -747,10 +706,6 @@ def create_multi_calendars(day_entries):
     write_calendar("ferry.ics", buckets["ferry"])
     write_calendar("other.ics", buckets["other"])
 
-
-# =========================
-# 主流程
-# =========================
 
 def run():
     with sync_playwright() as p:
