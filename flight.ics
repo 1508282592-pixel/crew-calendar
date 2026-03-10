@@ -1,25 +1,41 @@
 BEGIN:VCALENDAR
 VERSION:2.0
-PRODID:ics.py - http://git.io/lLljaA
+PRODID:-//Crew Calendar//CN
 BEGIN:VEVENT
-DESCRIPTION:日期：03月14日 周六 航班 09:05- 22:40\n任务类型：航班\n航班号：9C8946\n签到时间：07:10\n签到地点：西安咸阳\n任务时间：09:05 - 22:40\n人员类型：副驾驶\n人员名单：\n杨刚(T\,RT)段洋硕(R*)鲍国际(R)\n宋昕鸿(B)\n\n原始内容：\n03月14日 周六 航班 09:05- 22:40\n9C8946\nB32EFA321\n07:10 西安咸阳 航班动态\n西安咸阳上海虹桥 09:05- 11:10\n副驾驶\n杨刚(T\,RT)段洋硕(R*)鲍国际(R)\n宋昕鸿(B)
-DTEND:20260314T144000Z
-DTSTART:20260314T010500Z
+UID:航班-9C8946-20260314T090500-20260314T224000@crew-calendar
 SUMMARY:✈️ 9C8946
-UID:db9f2189-ed5b-4b0f-8ab2-c29d441ce595@db9f.org
+DTSTART;TZID=Asia/Shanghai:20260314T090500
+DTEND;TZID=Asia/Shanghai:20260314T224000
+DESCRIPTION:日期：03月14日 周六 航班 09:05- 22:40\n任务类型：航班\n航班号：9C8946\n签到时间：07:10\n签到地点：西安咸阳\n任务时间：09:05 - 22:40\n\n人员类型：副驾驶\n人员名单：\n杨刚(T\,RT)段洋硕(R*)鲍国际(R)\n宋昕鸿(B)\n\n航班追踪：https://www.flightradar24.com/data/flights/9C8946
+BEGIN:VALARM
+TRIGGER:-PT90M
+DESCRIPTION:签到提醒
+ACTION:DISPLAY
+END:VALARM
 END:VEVENT
 BEGIN:VEVENT
-DESCRIPTION:日期：03月14日 周六 航班 09:05- 22:40\n任务类型：航班\n航班号：9C8996\n航线：ZLXY → ZSSS\n任务时间：09:05 - 22:40\n\n原始内容：\n03月14日 周六 航班 09:05- 22:40\n9C8996\n咸\nZLXY\n09:05\n虹\nZSSS\n渝\nZUCK\n虹\nZSSS\n22:40
-DTEND:20260314T144000Z
-DTSTART:20260314T010500Z
+UID:航班-9C8995-20260314T090500-20260314T224000@crew-calendar
+SUMMARY:✈️ 9C8995
+DTSTART;TZID=Asia/Shanghai:20260314T090500
+DTEND;TZID=Asia/Shanghai:20260314T224000
+DESCRIPTION:日期：03月14日 周六 航班 09:05- 22:40\n任务类型：航班\n航班号：9C8995\n签到时间：14:20\n签到地点：上海虹桥\n任务时间：09:05 - 22:40\n机型：A321\n注册号：B326Q\n\n人员类型：副驾驶\n人员名单：\n杨刚(T\,RT)鲍国际(R)段洋硕(R*)\n龚婷(B)\n兰力牛琨彭高庆得\n\n航班追踪：https://www.flightradar24.com/data/flights/9C8995\n机号信息：https://www.flightradar24.com/data/aircraft/B326Q
+BEGIN:VALARM
+TRIGGER:-PT90M
+DESCRIPTION:签到提醒
+ACTION:DISPLAY
+END:VALARM
+END:VEVENT
+BEGIN:VEVENT
+UID:航班-9C8996-20260314T090500-20260314T224000@crew-calendar
 SUMMARY:✈️ 9C8996 ZLXY→ZSSS
-UID:3a6ca7ce-6460-480d-938a-1b4bc22d58b7@3a6c.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:日期：03月14日 周六 航班 09:05- 22:40\n任务类型：航班\n航班号：9C8995\n机型：A321\n注册号：B326Q\n签到时间：14:20\n签到地点：上海虹桥\n任务时间：09:05 - 22:40\n人员类型：副驾驶\n人员名单：\n杨刚(T\,RT)鲍国际(R)段洋硕(R*)\n龚婷(B)\n兰力牛琨彭高庆得\n\n原始内容：\n03月14日 周六 航班 09:05- 22:40\n9C8995\nB326QA321\n14:20 上海虹桥 航班动态\n上海虹桥重庆江北 16:05- 19:05\n副驾驶\n杨刚(T\,RT)鲍国际(R)段洋硕(R*)\n龚婷(B)\n兰力牛琨彭高庆得
-DTEND:20260314T144000Z
-DTSTART:20260314T010500Z
-SUMMARY:✈️ 9C8995\nA321 B326Q
-UID:f6ec8904-e34d-4da2-b362-be06e19b4a3b@f6ec.org
+DTSTART;TZID=Asia/Shanghai:20260314T090500
+DTEND;TZID=Asia/Shanghai:20260314T224000
+LOCATION:ZSSS
+DESCRIPTION:日期：03月14日 周六 航班 09:05- 22:40\n任务类型：航班\n航班号：9C8996\n航线：ZLXY → ZSSS\n任务时间：09:05 - 22:40\n\n航班追踪：https://www.flightradar24.com/data/flights/9C8996
+BEGIN:VALARM
+TRIGGER:-PT90M
+DESCRIPTION:签到提醒
+ACTION:DISPLAY
+END:VALARM
 END:VEVENT
 END:VCALENDAR
