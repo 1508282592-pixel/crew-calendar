@@ -41,7 +41,7 @@ AIRPORT_NAMES = sorted(AIRPORT_CN_TO_ICAO.keys(), key=len, reverse=True)
 
 def normalize_text(text: str) -> str:
     text = text.replace("\u00a0", " ")
-    text = re.sub(r"\r", "", text)
+    text = text.replace("\r", "")
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
@@ -158,7 +158,7 @@ def build_variants(img_bytes: bytes):
     variants.append(inv)
 
     sharp = img.filter(ImageFilter.SHARPEN)
-    sharp = sharp.resize((sharp.width * 3, sharp.height * 3))
+    sharp = sharp.resize((sharp.width * 3, img.height * 3))
     variants.append(sharp)
 
     return variants
@@ -208,19 +208,18 @@ def fill_login_form(page, code: str):
 
 
 def login(page, max_retries: int = 8):
-    for _attempt in range(1, max_retries + 1):
+    for attempt in range(1, max_retries + 1):
         try:
             page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=90000)
             page.wait_for_timeout(5000)
         except Exception:
-            if _attempt == max_retries:
+            if attempt == max_retries:
                 raise
             page.wait_for_timeout(5000)
             continue
 
         best_code = solve_captcha(page)
         if len(best_code) != 4:
-            page.wait_for_timeout(2000)
             continue
 
         candidates = generate_code_candidates(best_code, limit=12)
@@ -237,7 +236,6 @@ def login(page, max_retries: int = 8):
 
                 page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=90000)
                 page.wait_for_timeout(3000)
-
             except Exception:
                 try:
                     page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=90000)
@@ -249,7 +247,7 @@ def login(page, max_retries: int = 8):
 
 
 # =========================
-# 页面采集
+# 页面
 # =========================
 
 def open_mission_page(page):
@@ -269,7 +267,7 @@ def get_day_headers(page):
     headers = []
     for line in text.splitlines():
         line = line.strip()
-        if re.search(r"\d{2}月\d{2}日\s*周.", line):
+        if re.search(r"^\d{2}月\d{2}日\s*周.", line):
             headers.append(line)
 
     seen = set()
@@ -281,36 +279,48 @@ def get_day_headers(page):
     return out
 
 
-def click_day_toggle(page, header: str):
+def expand_day(page, header: str) -> bool:
     row = page.locator(f"text={header}").first
     box = row.bounding_box()
     if not box:
         return False
-
     x = box["x"] + box["width"] - 28
     y = box["y"] + box["height"] / 2
     page.mouse.click(x, y)
+    page.wait_for_timeout(1500)
     return True
-
-
-def expand_day(page, header: str):
-    ok = click_day_toggle(page, header)
-    if ok:
-        page.wait_for_timeout(1500)
-    return ok
 
 
 def collapse_day(page, header: str):
     try:
-        ok = click_day_toggle(page, header)
-        if ok:
-            page.wait_for_timeout(800)
+        row = page.locator(f"text={header}").first
+        box = row.bounding_box()
+        if not box:
+            return
+        x = box["x"] + box["width"] - 28
+        y = box["y"] + box["height"] / 2
+        page.mouse.click(x, y)
+        page.wait_for_timeout(800)
     except Exception:
         pass
 
 
+def get_day_block(page, header: str, next_header: str | None):
+    body_text = normalize_text(page.locator("body").inner_text())
+    start = body_text.find(header)
+    if start == -1:
+        return ""
+
+    if next_header:
+        end = body_text.find(next_header, start + len(header))
+        if end != -1:
+            return body_text[start:end].strip()
+
+    return body_text[start:].strip()
+
+
 # =========================
-# 分段：按详细卡头切
+# 按宽松卡头切段
 # =========================
 
 def detect_task_type(text: str) -> str:
@@ -349,29 +359,42 @@ def extract_date(text: str):
     return datetime.now(SH_TZ).year, int(m.group(1)), int(m.group(2))
 
 
-def is_card_header_line(line: str) -> bool:
-    line = normalize_text(line)
-    patterns = [
-        r'^9C\d{3,4}[A-Z]?\s+B\d{3,4}[A-Z]{0,2}\s+A3\d{2}$',
-        r'^9C\d{3,4}[A-Z]?\s+B\d{3,4}[A-Z]{0,2}\s+\|\s+A3\d{2}$',
-        r'^9C\d{3,4}[A-Z]?\s+B\d{3,4}[A-Z]{0,2}\s+A320$',
-        r'^9C\d{3,4}[A-Z]?\s+B\d{3,4}[A-Z]{0,2}\s+A321$',
-        r'^9C\d{3,4}[A-Z]?\s+B\d{3,4}[A-Z]{0,2}\s+A319$',
-        r'^9C\d{3,4}[A-Z]?\s+B\d{3,4}[A-Z]{0,2}\s+\|\s+A320$',
-        r'^9C\d{3,4}[A-Z]?\s+B\d{3,4}[A-Z]{0,2}\s+\|\s+A321$',
-        r'^9C\d{3,4}[A-Z]?\s+B\d{3,4}[A-Z]{0,2}\s+\|\s+A319$',
-    ]
-    return any(re.fullmatch(p, line) for p in patterns)
+def has_flight_no(line: str) -> bool:
+    return re.search(r'\b9C\d{3,4}[A-Z]?\b', line) is not None
 
 
-def split_day_block_by_card_headers(day_block: str):
+def has_reg(line: str) -> bool:
+    return re.search(r'\bB\d{3,4}[A-Z]{0,2}\b', line) is not None
+
+
+def has_model(line: str) -> bool:
+    return re.search(r'\b(A319|A320|A321)\b', line) is not None
+
+
+def looks_like_card_start(lines, i: int) -> bool:
+    line = normalize_text(lines[i])
+
+    # 形式1：同一行就包含 航班号 + 注册号 + 机型
+    if has_flight_no(line) and has_reg(line) and has_model(line):
+        return True
+
+    # 形式2：当前行只有航班号，下一行/下两行出现注册号和机型
+    if has_flight_no(line):
+        near = " ".join(normalize_text(x) for x in lines[i+1:i+3])
+        if has_reg(near) and has_model(near):
+            return True
+
+    return False
+
+
+def split_day_block_into_cards(day_block: str):
     lines = [normalize_text(x) for x in day_block.splitlines() if normalize_text(x)]
     if not lines:
         return []
 
     starts = []
-    for i, line in enumerate(lines):
-        if is_card_header_line(line):
+    for i in range(len(lines)):
+        if looks_like_card_start(lines, i):
             starts.append(i)
 
     cards = []
@@ -398,59 +421,8 @@ def split_day_block_by_card_headers(day_block: str):
     return uniq
 
 
-def collect_day_blocks(page):
-    day_headers = get_day_headers(page)
-    save_text("day_headers.txt", "\n".join(day_headers))
-
-    result = []
-
-    for idx, header in enumerate(day_headers):
-        if not expand_day(page, header):
-            continue
-
-        try:
-            body_text = normalize_text(page.locator("body").inner_text())
-            start = body_text.find(header)
-            if start == -1:
-                continue
-
-            if idx + 1 < len(day_headers):
-                next_header = day_headers[idx + 1]
-                end = body_text.find(next_header, start + len(header))
-                day_block = body_text[start:end].strip() if end != -1 else body_text[start:].strip()
-            else:
-                day_block = body_text[start:].strip()
-
-            result.append({
-                "day_header": header,
-                "task_type": detect_task_type(header),
-                "day_block": day_block,
-                "cards": split_day_block_by_card_headers(day_block),
-            })
-
-        finally:
-            collapse_day(page, header)
-
-    save_text(
-        "day_blocks_debug.txt",
-        "\n\n========== DAY ==========\n\n".join(
-            f"{x['day_header']}\n\n{x['day_block']}" for x in result
-        )
-    )
-
-    save_text(
-        "cards_debug.txt",
-        "\n\n========== DAY ==========\n\n".join(
-            f"{x['day_header']}\n\n" + "\n\n------ CARD ------\n\n".join(x["cards"])
-            for x in result
-        )
-    )
-
-    return result
-
-
 # =========================
-# 卡片解析
+# 解析卡片
 # =========================
 
 def extract_flight_no(card_text: str) -> str:
@@ -460,7 +432,7 @@ def extract_flight_no(card_text: str) -> str:
 
 def extract_reg_and_model(card_text: str):
     patterns = [
-        r'\b(B\d{3,4}[A-Z]{0,2})\s+\|\s+(A319|A320|A321)\b',
+        r'\b(B\d{3,4}[A-Z]{0,2})\s*\|\s*(A319|A320|A321)\b',
         r'\b(B\d{3,4}[A-Z]{0,2})\s+(A319|A320|A321)\b',
         r'\b(B\d{3,4}[A-Z]{0,2})(A319|A320|A321)\b',
     ]
@@ -468,7 +440,19 @@ def extract_reg_and_model(card_text: str):
         m = re.search(p, card_text)
         if m:
             return m.group(1), m.group(2)
-    return "", ""
+
+    reg = ""
+    model = ""
+
+    m_reg = re.search(r'\bB\d{3,4}[A-Z]{0,2}\b', card_text)
+    if m_reg:
+        reg = m_reg.group(0)
+
+    m_model = re.search(r'\b(A319|A320|A321)\b', card_text)
+    if m_model:
+        model = m_model.group(0)
+
+    return reg, model
 
 
 def extract_checkin(card_text: str):
@@ -501,9 +485,8 @@ def extract_airports(card_text: str):
     dep_cn = ""
     arr_cn = ""
 
-    lines = [normalize_text(x) for x in card_text.splitlines() if normalize_text(x)]
+    lines = [x.strip() for x in card_text.splitlines() if x.strip()]
     candidate_lines = []
-
     for line in lines:
         if re.search(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', line) and "航班动态" not in line:
             candidate_lines.append(line)
@@ -529,7 +512,7 @@ def extract_airports(card_text: str):
 
 
 def extract_people_lines(card_text: str):
-    lines = [normalize_text(x) for x in card_text.splitlines() if normalize_text(x)]
+    lines = [x.strip() for x in card_text.splitlines() if x.strip()]
     out = []
     capture = False
 
@@ -545,6 +528,8 @@ def extract_people_lines(card_text: str):
             continue
         if re.search(r'\b9C\d{3,4}[A-Z]?\b', line):
             continue
+        if re.search(r'\b[A-Z]{4}\b', line):
+            continue
         if re.search(r'\d{2}:\d{2}', line):
             continue
         if re.search(r'^B\d{3,4}', line):
@@ -558,8 +543,8 @@ def extract_people_lines(card_text: str):
 
         out.append(line)
 
-    uniq = []
     seen = set()
+    uniq = []
     for x in out:
         if x not in seen:
             seen.add(x)
@@ -587,7 +572,7 @@ def build_description(item: dict) -> str:
     fr24_number = fr24_flight_code(item["flight_no"]) if item["flight_no"] else ""
 
     lines = []
-    lines.append(f"{item['day_header']}")
+    lines.append(item["day_header"])
     lines.append(f"航班号：{item['flight_no']}")
 
     if item["dep"] or item["arr"]:
@@ -689,8 +674,38 @@ def event_quality(item: dict) -> int:
 
 
 # =========================
-# 生成日历
+# 主逻辑
 # =========================
+
+def collect_day_blocks(page):
+    day_headers = get_day_headers(page)
+    save_text("day_headers.txt", "\n".join(day_headers))
+
+    result = []
+    for idx, header in enumerate(day_headers):
+        next_header = day_headers[idx + 1] if idx + 1 < len(day_headers) else None
+
+        if not expand_day(page, header):
+            continue
+
+        try:
+            day_block = get_day_block(page, header, next_header)
+            cards = split_day_block_into_cards(day_block)
+
+            key = re.sub(r'[^0-9A-Za-z]+', '_', header)
+            save_text(f"block_{key}.txt", day_block)
+            save_text(f"cards_{key}.txt", "\n\n==========\n\n".join(cards))
+
+            result.append({
+                "day_header": header,
+                "task_type": detect_task_type(header),
+                "cards": cards,
+            })
+        finally:
+            collapse_day(page, header)
+
+    return result
+
 
 def create_multi_calendars_from_blocks(day_blocks):
     buckets = {
@@ -770,10 +785,6 @@ def create_multi_calendars_from_blocks(day_blocks):
     write_calendar("ferry.ics", buckets["ferry"])
     write_calendar("other.ics", buckets["other"])
 
-
-# =========================
-# 主流程
-# =========================
 
 def run():
     with sync_playwright() as p:
