@@ -2,10 +2,10 @@ BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:ics.py - http://git.io/lLljaA
 BEGIN:VEVENT
-DESCRIPTION:Auto generated schedule
-DTEND:20260310T070448Z
-DTSTART:20260310T060448Z
-SUMMARY:Crew Schedule Sync
-UID:95984236-6e28-47b4-a5b7-7c94320db76b@9598.org
+DESCRIPTION:首页\n我的任务\n个人中心\n飞行信息\n文件通告\n飞行互评\n意见反馈\n退出\n 段洋硕\n English Version\n搜索\n取消\n意见反馈\n图片\n涉及功能 \n提交\n常见问题\n所有反馈\n我的反馈\n\n我的手机号码信息有误，最新的号码18516246912\n\n注意\n\n请输入反馈内容!\n\n确认
+DTEND:20260310T072549Z
+DTSTART:20260310T062549Z
+SUMMARY:Crew Tasks Loaded
+UID:8df17872-f1df-434b-878e-376af3e7f53f@8df1.org
 END:VEVENT
 END:VCALENDAR
