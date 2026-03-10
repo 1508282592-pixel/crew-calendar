@@ -523,7 +523,7 @@ def extract_airports(card_text: str):
         if c not in uniq:
             uniq.append(c)
     if len(uniq) >= 2:
-        return uniq[0], uniq[1], dep_cn, arr_cn)
+        return uniq[0], uniq[1], dep_cn, arr_cn
 
     return "", "", dep_cn, arr_cn
 
