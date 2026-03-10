@@ -101,7 +101,6 @@ def build_variants(img_bytes: bytes):
     img = ImageOps.autocontrast(img)
 
     variants = []
-
     variants.append(img.resize((img.width * 3, img.height * 3)))
 
     for threshold in [140, 155, 170, 185]:
@@ -230,24 +229,32 @@ def open_mission_page(page):
     page.screenshot(path=os.path.join(ARTIFACT_DIR, "mission_page_before_expand.png"), full_page=True)
 
 
-def expand_all(page):
-    selectors = [
-        "svg",
-        "i",
-        "button",
-        "[class*='arrow']",
-        "[class*='expand']",
-        "[class*='toggle']",
-        "[class*='icon']",
-    ]
+def expand_task_rows_only(page):
+    """
+    只在右侧任务区域里找展开箭头，避免点到顶部菜单“意见反馈”等图标
+    """
+    # 任务区在页面右半部分
+    right_half = page.locator("body").locator("xpath=.//*").filter(
+        has_text=re.compile(r"\d{2}月\d{2}日")
+    )
 
-    for selector in selectors:
+    # 先尝试直接点所有含日期的行末按钮/图标
+    count = right_half.count()
+    print("task-like row count:", count)
+
+    for i in range(count):
         try:
-            items = page.locator(selector)
-            for i in range(items.count()):
+            row = right_half.nth(i)
+            # 行里常见可点元素
+            for selector in ["button", "svg", "i", "[class*='arrow']", "[class*='icon']"]:
                 try:
-                    items.nth(i).click(timeout=800)
-                    page.wait_for_timeout(200)
+                    items = row.locator(selector)
+                    for j in range(items.count()):
+                        try:
+                            items.nth(j).click(timeout=800)
+                            page.wait_for_timeout(200)
+                        except Exception:
+                            pass
                 except Exception:
                     pass
         except Exception:
@@ -485,7 +492,7 @@ def run():
 
         login(page, max_retries=8)
         open_mission_page(page)
-        expand_all(page)
+        expand_task_rows_only(page)
 
         task_area_text = extract_task_area_text(page)
         blocks = split_tasks(task_area_text)
