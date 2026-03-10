@@ -10,6 +10,7 @@ from PIL import Image, ImageOps, ImageFilter
 import pytesseract
 from playwright.sync_api import sync_playwright
 
+
 LOGIN_URL = "https://cp.9cair.com"
 MISSION_URL = "https://cp.9cair.com/html/task/mission.html"
 
@@ -38,6 +39,10 @@ AIRPORT_CN_TO_ICAO = {
 
 AIRPORT_NAMES = sorted(AIRPORT_CN_TO_ICAO.keys(), key=len, reverse=True)
 
+
+# =========================
+# 基础工具
+# =========================
 
 def normalize_text(text: str) -> str:
     text = text.replace("\u00a0", " ")
@@ -154,11 +159,11 @@ def build_variants(img_bytes: bytes):
         variants.append(bw)
 
     inv = ImageOps.invert(img)
-    inv = inv.resize((inv.width * 3, inv.height * 3))
+    inv = inv.resize((img.width * 3, img.height * 3))
     variants.append(inv)
 
     sharp = img.filter(ImageFilter.SHARPEN)
-    sharp = sharp.resize((sharp.width * 3, img.height * 3))
+    sharp = sharp.resize((img.width * 3, img.height * 3))
     variants.append(sharp)
 
     return variants
@@ -247,7 +252,7 @@ def login(page, max_retries: int = 8):
 
 
 # =========================
-# 页面
+# 页面操作
 # =========================
 
 def open_mission_page(page):
@@ -279,28 +284,30 @@ def get_day_headers(page):
     return out
 
 
-def expand_day(page, header: str) -> bool:
+def click_day_toggle(page, header: str) -> bool:
     row = page.locator(f"text={header}").first
     box = row.bounding_box()
     if not box:
         return False
+
     x = box["x"] + box["width"] - 28
     y = box["y"] + box["height"] / 2
     page.mouse.click(x, y)
-    page.wait_for_timeout(1500)
     return True
+
+
+def expand_day(page, header: str) -> bool:
+    ok = click_day_toggle(page, header)
+    if ok:
+        page.wait_for_timeout(1500)
+    return ok
 
 
 def collapse_day(page, header: str):
     try:
-        row = page.locator(f"text={header}").first
-        box = row.bounding_box()
-        if not box:
-            return
-        x = box["x"] + box["width"] - 28
-        y = box["y"] + box["height"] / 2
-        page.mouse.click(x, y)
-        page.wait_for_timeout(800)
+        ok = click_day_toggle(page, header)
+        if ok:
+            page.wait_for_timeout(800)
     except Exception:
         pass
 
@@ -320,7 +327,7 @@ def get_day_block(page, header: str, next_header: str | None):
 
 
 # =========================
-# 按宽松卡头切段
+# 识别每张详细卡
 # =========================
 
 def detect_task_type(text: str) -> str:
@@ -328,15 +335,6 @@ def detect_task_type(text: str) -> str:
         if t in text:
             return t
     return "任务"
-
-
-def task_bucket(task_type: str) -> str:
-    return {
-        "航班": "flight",
-        "置位": "positioning",
-        "训练": "training",
-        "摆渡": "ferry",
-    }.get(task_type, "other")
 
 
 def detect_icon(task_type: str) -> str:
@@ -352,6 +350,15 @@ def detect_icon(task_type: str) -> str:
     }.get(task_type, "🗂")
 
 
+def task_bucket(task_type: str) -> str:
+    return {
+        "航班": "flight",
+        "置位": "positioning",
+        "训练": "training",
+        "摆渡": "ferry",
+    }.get(task_type, "other")
+
+
 def extract_date(text: str):
     m = re.search(r'(\d{2})月(\d{2})日', text)
     if not m:
@@ -359,42 +366,32 @@ def extract_date(text: str):
     return datetime.now(SH_TZ).year, int(m.group(1)), int(m.group(2))
 
 
-def has_flight_no(line: str) -> bool:
-    return re.search(r'\b9C\d{3,4}[A-Z]?\b', line) is not None
+def is_flight_line(s: str) -> bool:
+    return re.fullmatch(r'9C\d{3,4}[A-Z]?', s) is not None
 
 
-def has_reg(line: str) -> bool:
-    return re.search(r'\bB\d{3,4}[A-Z]{0,2}\b', line) is not None
-
-
-def has_model(line: str) -> bool:
-    return re.search(r'\b(A319|A320|A321)\b', line) is not None
-
-
-def looks_like_card_start(lines, i: int) -> bool:
-    line = normalize_text(lines[i])
-
-    # 形式1：同一行就包含 航班号 + 注册号 + 机型
-    if has_flight_no(line) and has_reg(line) and has_model(line):
-        return True
-
-    # 形式2：当前行只有航班号，下一行/下两行出现注册号和机型
-    if has_flight_no(line):
-        near = " ".join(normalize_text(x) for x in lines[i+1:i+3])
-        if has_reg(near) and has_model(near):
-            return True
-
-    return False
+def is_reg_model_line(s: str) -> bool:
+    return re.fullmatch(r'B\d{3,4}[A-Z]{0,2}A(319|320|321)', s) is not None
 
 
 def split_day_block_into_cards(day_block: str):
+    """
+    真实文本结构：
+    9C8946
+    B32EFA321
+    07:10 西安咸阳 航班动态
+    西安咸阳上海虹桥 09:05- 11:10
+    ...
+    所以只认：
+    “航班号单独一行” + “下一行是注册号机型”
+    """
     lines = [normalize_text(x) for x in day_block.splitlines() if normalize_text(x)]
     if not lines:
         return []
 
     starts = []
-    for i in range(len(lines)):
-        if looks_like_card_start(lines, i):
+    for i in range(len(lines) - 1):
+        if is_flight_line(lines[i]) and is_reg_model_line(lines[i + 1]):
             starts.append(i)
 
     cards = []
@@ -406,8 +403,6 @@ def split_day_block_into_cards(day_block: str):
         if "航班动态" not in chunk:
             continue
         if not re.search(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', chunk):
-            continue
-        if not re.search(r'\b9C\d{3,4}[A-Z]?\b', chunk):
             continue
 
         cards.append(chunk)
@@ -426,20 +421,19 @@ def split_day_block_into_cards(day_block: str):
 # =========================
 
 def extract_flight_no(card_text: str) -> str:
+    lines = [normalize_text(x) for x in card_text.splitlines() if normalize_text(x)]
+    for line in lines:
+        if re.fullmatch(r'9C\d{3,4}[A-Z]?', line):
+            return line
+
     m = re.search(r'\b9C\d{3,4}[A-Z]?\b', card_text)
     return m.group(0) if m else ""
 
 
 def extract_reg_and_model(card_text: str):
-    patterns = [
-        r'\b(B\d{3,4}[A-Z]{0,2})\s*\|\s*(A319|A320|A321)\b',
-        r'\b(B\d{3,4}[A-Z]{0,2})\s+(A319|A320|A321)\b',
-        r'\b(B\d{3,4}[A-Z]{0,2})(A319|A320|A321)\b',
-    ]
-    for p in patterns:
-        m = re.search(p, card_text)
-        if m:
-            return m.group(1), m.group(2)
+    m = re.search(r'\b(B\d{3,4}[A-Z]{0,2})(A319|A320|A321)\b', card_text)
+    if m:
+        return m.group(1), m.group(2)
 
     reg = ""
     model = ""
@@ -512,7 +506,7 @@ def extract_airports(card_text: str):
 
 
 def extract_people_lines(card_text: str):
-    lines = [x.strip() for x in card_text.splitlines() if x.strip()]
+    lines = [normalize_text(x) for x in card_text.splitlines() if normalize_text(x)]
     out = []
     capture = False
 
@@ -526,15 +520,11 @@ def extract_people_lines(card_text: str):
 
         if "航班动态" in line:
             continue
-        if re.search(r'\b9C\d{3,4}[A-Z]?\b', line):
+        if re.fullmatch(r'9C\d{3,4}[A-Z]?', line):
             continue
-        if re.search(r'\b[A-Z]{4}\b', line):
+        if re.fullmatch(r'B\d{3,4}[A-Z]{0,2}A(319|320|321)', line):
             continue
         if re.search(r'\d{2}:\d{2}', line):
-            continue
-        if re.search(r'^B\d{3,4}', line):
-            continue
-        if re.search(r'\b(A319|A320|A321)\b', line):
             continue
         if "查看更多" in line:
             continue
@@ -543,8 +533,8 @@ def extract_people_lines(card_text: str):
 
         out.append(line)
 
-    seen = set()
     uniq = []
+    seen = set()
     for x in out:
         if x not in seen:
             seen.add(x)
@@ -553,7 +543,7 @@ def extract_people_lines(card_text: str):
 
 
 # =========================
-# ICS 输出
+# 生成 ICS
 # =========================
 
 def build_title(task_type, flight_no, dep, arr, dep_cn, arr_cn):
@@ -575,10 +565,10 @@ def build_description(item: dict) -> str:
     lines.append(item["day_header"])
     lines.append(f"航班号：{item['flight_no']}")
 
-    if item["dep"] or item["arr"]:
-        lines.append(f"航线：{item['dep']} → {item['arr']}")
     if item["dep_cn"] or item["arr_cn"]:
         lines.append(f"航线：{item['dep_cn']} → {item['arr_cn']}")
+    elif item["dep"] or item["arr"]:
+        lines.append(f"航线：{item['dep']} → {item['arr']}")
 
     if item["checkin_time"]:
         lines.append(f"签到时间：{item['checkin_time']}")
