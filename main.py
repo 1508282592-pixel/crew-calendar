@@ -21,6 +21,20 @@ os.makedirs(ARTIFACT_DIR, exist_ok=True)
 
 SH_TZ = ZoneInfo("Asia/Shanghai")
 
+AIRPORT_CN_TO_ICAO = {
+    "上海虹桥": "ZSSS",
+    "上海浦东": "ZSPD",
+    "西安咸阳": "ZLXY",
+    "重庆江北": "ZUCK",
+    "大连周水子": "ZYTL",
+    "深圳宝安": "ZGSZ",
+    "济南遥墙": "ZSJN",
+    "哈尔滨太平": "ZYHB",
+    "淮安涟水": "ZSSH",
+}
+
+AIRPORT_NAMES = sorted(AIRPORT_CN_TO_ICAO.keys(), key=len, reverse=True)
+
 
 # =========================
 # 基础工具
@@ -256,7 +270,8 @@ def get_task_header_lines(page):
 
 def collect_day_entries_one_by_one(page):
     """
-    一天一条展开，一天一条收起，只取当前天的块。
+    一天一条展开，一天一条收起。
+    只取当前天自己的块。
     """
     day_entries = []
     header_lines = get_task_header_lines(page)
@@ -271,7 +286,6 @@ def collect_day_entries_one_by_one(page):
             x = box["x"] + box["width"] - 28
             y = box["y"] + box["height"] / 2
 
-            # 展开
             page.mouse.click(x, y)
             page.wait_for_timeout(1200)
 
@@ -291,7 +305,6 @@ def collect_day_entries_one_by_one(page):
 
             day_entries.append(block)
 
-            # 收起
             page.mouse.click(x, y)
             page.wait_for_timeout(800)
 
@@ -342,12 +355,15 @@ def extract_date(text: str):
     return datetime.now(SH_TZ).year, int(m.group(1)), int(m.group(2))
 
 
-def split_day_entry_into_segments(day_entry: str):
+def split_day_entry_into_detailed_segments(day_entry: str):
     """
-    一天内容拆成多个航班段。
-    规则：
-    - 顶部第一行是日期头
-    - 每遇到独立的 9Cxxxx 行，就开始一个新航段
+    只拆出真正详细航段。
+    详细航段必须至少满足：
+    - 以独立 9Cxxxx 行开始
+    - 段内有 航班动态
+    - 段内有 B注册号+机型
+    - 段内有一条 xx:xx-xx:xx
+    这样顶部摘要里的裸航班号就不会被当成事件。
     """
     lines = [x.strip() for x in day_entry.splitlines() if x.strip()]
     if not lines:
@@ -372,7 +388,11 @@ def split_day_entry_into_segments(day_entry: str):
     out = []
     for seg_lines in segments:
         seg_text = "\n".join(seg_lines)
-        if re.search(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', seg_text):
+        has_flight_dynamic = "航班动态" in seg_text
+        has_reg_model = re.search(r'B\d{3,4}[A-Z]?A3\d{2}', seg_text) is not None
+        has_range = re.search(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', seg_text) is not None
+
+        if has_flight_dynamic and has_reg_model and has_range:
             out.append(seg_text)
 
     return out
@@ -415,8 +435,8 @@ def extract_checkin(segment: str):
 
 def extract_start_end_time(segment: str):
     """
-    取当前航段自己的时间区间，不取当天总时间。
-    优先取最后一个时间区间，因为详细段里通常最后那组才是该航段自己的时间。
+    取当前航段自己的时间区间。
+    优先取最后一个时间区间，因为详细段最后那组通常就是本航段。
     """
     ranges = re.findall(r'(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})', segment)
     if ranges:
@@ -424,59 +444,41 @@ def extract_start_end_time(segment: str):
     return "", ""
 
 
-def extract_route_cn(segment: str):
-    """
-    从中文航线里取出当前航段自己的起终点。
-    例如：
-    西安咸阳上海虹桥 09:05-11:10
-    上海虹桥重庆江北 16:05-19:05
-    重庆江北上海虹桥 20:15-22:40
-    """
-    lines = [x.strip() for x in segment.splitlines() if x.strip()]
-    candidates = []
-
-    for line in lines:
-        if re.search(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', line) and "航班动态" not in line:
-            candidates.append(line)
-
-    if not candidates:
-        return "", ""
-
-    line = candidates[-1]
+def parse_route_cn_from_line(line: str):
     line = re.sub(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', '', line).strip()
-
-    m = re.match(r'^([\u4e00-\u9fff]{2,10})([\u4e00-\u9fff]{2,10})$', line)
-    if m:
-        return m.group(1), m.group(2)
-
+    for dep_cn in AIRPORT_NAMES:
+        if line.startswith(dep_cn):
+            remain = line[len(dep_cn):]
+            for arr_cn in AIRPORT_NAMES:
+                if remain == arr_cn:
+                    return dep_cn, arr_cn
     return "", ""
-
-
-AIRPORT_CN_TO_ICAO = {
-    "上海虹桥": "ZSSS",
-    "上海浦东": "ZSPD",
-    "西安咸阳": "ZLXY",
-    "重庆江北": "ZUCK",
-    "大连周水子": "ZYTL",
-    "深圳宝安": "ZGSZ",
-    "济南遥墙": "ZSJN",
-    "哈尔滨太平": "ZYHB",
-    "淮安涟水": "ZSSH",
-}
 
 
 def extract_airports(segment: str):
     """
-    优先从中文航线映射到 ICAO；
-    如果失败，再退回从文本里抓 ICAO。
+    优先从中文航线行里取出当前航段自己的起终点。
+    再映射成 ICAO。
     """
-    dep_cn, arr_cn = extract_route_cn(segment)
+    dep_cn = ""
+    arr_cn = ""
+
+    lines = [x.strip() for x in segment.splitlines() if x.strip()]
+    candidate_lines = []
+    for line in lines:
+        if re.search(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', line) and "航班动态" not in line:
+            candidate_lines.append(line)
+
+    if candidate_lines:
+        dep_cn, arr_cn = parse_route_cn_from_line(candidate_lines[-1])
+
     dep = AIRPORT_CN_TO_ICAO.get(dep_cn, "")
     arr = AIRPORT_CN_TO_ICAO.get(arr_cn, "")
 
     if dep and arr:
         return dep, arr, dep_cn, arr_cn
 
+    # 兜底：直接抓 ICAO
     codes = re.findall(r'\b[A-Z]{4}\b', segment)
     uniq = []
     for c in codes:
@@ -525,7 +527,6 @@ def extract_people_lines(segment: str):
 
         out.append(line)
 
-    # 去重保持顺序
     seen = set()
     uniq = []
     for x in out:
@@ -536,13 +537,16 @@ def extract_people_lines(segment: str):
 
 
 # =========================
-# 事件模板（参考你给的 ICS 思路）
+# 事件模板
 # =========================
 
-def build_title(task_type, flight_no, dep, arr):
+def build_title(task_type, flight_no, dep, arr, dep_cn, arr_cn):
     icon = detect_icon(task_type)
+
     if flight_no and dep and arr:
         return f"{icon} {flight_no} {dep}→{arr}"
+    if flight_no and dep_cn and arr_cn:
+        return f"{icon} {flight_no} {dep_cn}→{arr_cn}"
     if flight_no:
         return f"{icon} {flight_no}"
     return f"{icon} {task_type}"
@@ -558,7 +562,6 @@ def build_description(item: dict) -> str:
 
     if item["dep"] or item["arr"]:
         lines.append(f"航线：{item['dep']} → {item['arr']}")
-
     if item["dep_cn"] or item["arr_cn"]:
         lines.append(f"中文航线：{item['dep_cn']} → {item['arr_cn']}")
 
@@ -586,194 +589,5 @@ def build_description(item: dict) -> str:
     if fr24_number:
         lines.append("")
         lines.append(f"航班追踪：https://www.flightradar24.com/data/flights/{fr24_number}")
-
     if item["reg"]:
-        lines.append(f"机号信息：https://www.flightradar24.com/data/aircraft/{item['reg']}")
-
-    return "\n".join(lines)
-
-
-def build_vevent(item: dict) -> str:
-    title = build_title(item["task_type"], item["flight_no"], item["dep"], item["arr"])
-    desc = build_description(item)
-
-    uid = (
-        f'{item["task_type"]}-'
-        f'{item["flight_no"]}-'
-        f'{format_dt_local(item["start_dt"])}-'
-        f'{format_dt_local(item["end_dt"])}@crew-calendar'
-    )
-
-    lines = [
-        "BEGIN:VEVENT",
-        f"UID:{uid}",
-        f"SUMMARY:{escape_ics_text(title)}",
-        f"DTSTART;TZID=Asia/Shanghai:{format_dt_local(item['start_dt'])}",
-        f"DTEND;TZID=Asia/Shanghai:{format_dt_local(item['end_dt'])}",
-    ]
-
-    if item["arr"]:
-        lines.append(f"LOCATION:{escape_ics_text(item['arr'])}")
-
-    lines.append(f"DESCRIPTION:{escape_ics_text(desc)}")
-
-    # 固定：签到前90分钟提醒
-    lines.extend([
-        "BEGIN:VALARM",
-        "TRIGGER:-PT90M",
-        "DESCRIPTION:签到提醒",
-        "ACTION:DISPLAY",
-        "END:VALARM",
-    ])
-
-    lines.append("END:VEVENT")
-    return "\n".join(lines)
-
-
-def write_calendar(filename: str, items: list[dict]):
-    content = [
-        "BEGIN:VCALENDAR",
-        "VERSION:2.0",
-        "PRODID:-//Crew Calendar//CN",
-    ]
-
-    for item in items:
-        content.append(build_vevent(item))
-
-    content.append("END:VCALENDAR")
-
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write("\n".join(content))
-
-
-# =========================
-# 事件生成
-# =========================
-
-def event_quality(item: dict) -> int:
-    score = 0
-    if item["flight_no"]:
-        score += 10
-    if item["dep"] and item["arr"]:
-        score += 50
-    if item["dep_cn"] and item["arr_cn"]:
-        score += 20
-    if item["reg"]:
-        score += 10
-    if item["model"]:
-        score += 10
-    if item["checkin_time"]:
-        score += 10
-    if item["checkin_place"]:
-        score += 10
-    if item["people_lines"]:
-        score += 10
-    return score
-
-
-def create_multi_calendars(day_entries):
-    buckets = {
-        "flight": [],
-        "positioning": [],
-        "training": [],
-        "ferry": [],
-        "other": [],
-    }
-
-    best_events = {}
-
-    for day_entry in day_entries:
-        task_type = detect_task_type(day_entry)
-        date_info = extract_date(day_entry)
-        if not date_info:
-            continue
-
-        header_line = day_entry.splitlines()[0] if day_entry.splitlines() else ""
-        day_header = header_line
-        segments = split_day_entry_into_segments(day_entry)
-
-        for seg in segments:
-            flight_no = extract_flight_no(seg)
-            reg, model = extract_reg_and_model(seg)
-            start_time, end_time = extract_start_end_time(seg)
-            checkin_time, checkin_place = extract_checkin(seg)
-            dep, arr, dep_cn, arr_cn = extract_airports(seg)
-            people_type = extract_people_type(seg)
-            people_lines = extract_people_lines(seg)
-
-            if not flight_no or not start_time or not end_time:
-                continue
-
-            year, month, day = date_info
-            start_dt = make_datetime(year, month, day, start_time)
-            end_dt = make_datetime(year, month, day, end_time)
-            if end_dt <= start_dt:
-                end_dt += timedelta(days=1)
-
-            item = {
-                "day_header": day_header,
-                "task_type": task_type,
-                "flight_no": flight_no,
-                "dep": dep,
-                "arr": arr,
-                "dep_cn": dep_cn,
-                "arr_cn": arr_cn,
-                "start_time": start_time,
-                "end_time": end_time,
-                "checkin_time": checkin_time,
-                "checkin_place": checkin_place,
-                "model": model,
-                "reg": reg,
-                "people_type": people_type,
-                "people_lines": people_lines,
-                "start_dt": start_dt,
-                "end_dt": end_dt,
-            }
-
-            group_key = (
-                task_type,
-                flight_no,
-                start_dt.isoformat(),
-                end_dt.isoformat(),
-            )
-
-            q = event_quality(item)
-            item["quality"] = q
-
-            if group_key not in best_events or q > best_events[group_key]["quality"]:
-                best_events[group_key] = item
-
-    for item in best_events.values():
-        bucket = task_bucket(item["task_type"])
-        buckets[bucket].append(item)
-
-    for key in buckets:
-        buckets[key].sort(key=lambda x: (x["start_dt"], x["flight_no"]))
-
-    write_calendar("flight.ics", buckets["flight"])
-    write_calendar("positioning.ics", buckets["positioning"])
-    write_calendar("training.ics", buckets["training"])
-    write_calendar("ferry.ics", buckets["ferry"])
-    write_calendar("other.ics", buckets["other"])
-
-
-# =========================
-# 主流程
-# =========================
-
-def run():
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        page = browser.new_page(viewport={"width": 1400, "height": 1000})
-
-        login(page, max_retries=8)
-        open_mission_page(page)
-
-        day_entries = collect_day_entries_one_by_one(page)
-        create_multi_calendars(day_entries)
-
-        browser.close()
-
-
-if __name__ == "__main__":
-    run()
+        lines.append(f"机号信息：https://www.flightradar24.com/data/
