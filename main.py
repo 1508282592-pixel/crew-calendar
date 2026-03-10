@@ -46,6 +46,11 @@ FLIGHT_NO_RE = re.compile(r"9C\d{3,4}[A-Z]?")
 REG_MODEL_RE = re.compile(r"^B[0-9A-Z]{4,5}A(?:319|320|321)$")
 REG_AND_MODEL_RE = re.compile(r"\b(B[0-9A-Z]{4,5})(A319|A320|A321)\b")
 REG_ONLY_RE = re.compile(r"\bB[0-9A-Z]{4,5}\b")
+TIME_RANGE_RE = re.compile(r"(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})")
+DAY_HEADER_RE = re.compile(r"^\d{2}月\d{2}日\s*周.")
+PAGE_YEAR_MONTH_RE = re.compile(r"(\d{4})年(\d{1,2})月")
+PURE_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+CHINESE_NAME_RE = re.compile(r"[\u4e00-\u9fff]{2,4}(?:\([^)]*\))?")
 
 
 # =========================
@@ -63,6 +68,11 @@ def normalize_text(text: str) -> str:
 def save_text(filename: str, text: str):
     with open(os.path.join(ARTIFACT_DIR, filename), "w", encoding="utf-8") as f:
         f.write(text)
+
+
+def save_bytes(filename: str, content: bytes):
+    with open(os.path.join(ARTIFACT_DIR, filename), "wb") as f:
+        f.write(content)
 
 
 def escape_ics_text(text: str) -> str:
@@ -84,6 +94,10 @@ def fr24_flight_code(flight_number: str) -> str:
 def make_datetime(year: int, month: int, day: int, hhmm: str) -> datetime:
     hh, mm = map(int, hhmm.split(":"))
     return datetime(year, month, day, hh, mm, tzinfo=SH_TZ)
+
+
+def safe_name(s: str) -> str:
+    return re.sub(r"[^0-9A-Za-z_\-]+", "_", s).strip("_") or "unnamed"
 
 
 # =========================
@@ -122,12 +136,13 @@ def expand_char_options(ch: str):
         "8": ["8", "B"], "B": ["B", "8"],
         "2": ["2", "Z"], "Z": ["Z", "2"],
         "6": ["6", "G"], "G": ["G", "6"],
-        "3": ["3", "B"],
+        "3": ["3", "B"], "B": ["B", "8", "3"],
+        "7": ["7", "T"], "T": ["T", "7"],
     }
     return mapping.get(ch, [ch])
 
 
-def generate_code_candidates(code: str, limit: int = 12):
+def generate_code_candidates(code: str, limit: int = 20):
     pools = [expand_char_options(ch) for ch in code]
     all_codes = []
     for combo in product(*pools):
@@ -159,24 +174,30 @@ def build_variants(img_bytes: bytes):
     img = ImageOps.autocontrast(img)
 
     variants = []
-    variants.append(img.resize((img.width * 3, img.height * 3)))
+    variants.append(("base_x3", img.resize((img.width * 3, img.height * 3))))
+    variants.append(("base_x4", img.resize((img.width * 4, img.height * 4))))
 
-    for threshold in [140, 155, 170, 185]:
-        bw = img.point(lambda x: 255 if x > threshold else 0, mode="1")
+    for threshold in [135, 145, 155, 165, 175, 185]:
+        bw = img.point(lambda x, t=threshold: 255 if x > t else 0, mode="1")
         bw = bw.resize((bw.width * 3, bw.height * 3))
-        variants.append(bw)
+        variants.append((f"bw_{threshold}", bw))
 
     inv = ImageOps.invert(img).resize((img.width * 3, img.height * 3))
-    variants.append(inv)
+    variants.append(("invert_x3", inv))
 
     sharp = img.filter(ImageFilter.SHARPEN).resize((img.width * 3, img.height * 3))
-    variants.append(sharp)
+    variants.append(("sharp_x3", sharp))
+
+    median = img.filter(ImageFilter.MedianFilter(size=3)).resize((img.width * 3, img.height * 3))
+    variants.append(("median_x3", median))
 
     return variants
 
 
-def solve_captcha(page) -> str:
+def solve_captcha(page, attempt_no: int = 0) -> str:
     img_bytes = extract_captcha_bytes(page)
+    save_bytes(f"captcha_attempt_{attempt_no}.png", img_bytes)
+
     variants = build_variants(img_bytes)
 
     configs = [
@@ -186,12 +207,17 @@ def solve_captcha(page) -> str:
     ]
 
     candidates = []
-    for variant in variants:
+    raw_log = []
+
+    for variant_name, variant in variants:
         for cfg in configs:
             raw = pytesseract.image_to_string(variant, config=cfg)
             cleaned = normalize_candidate(raw)
+            raw_log.append(f"{variant_name} | {cfg} | raw={raw!r} | cleaned={cleaned!r}")
             if cleaned:
                 candidates.append(cleaned)
+
+    save_text(f"captcha_attempt_{attempt_no}_ocr.txt", "\n".join(raw_log))
 
     if not candidates:
         return ""
@@ -218,39 +244,60 @@ def fill_login_form(page, code: str):
     inputs.nth(2).fill(code)
 
 
-def login(page, max_retries: int = 8):
+def page_text(page) -> str:
+    try:
+        return page.locator("body").inner_text(timeout=8000)
+    except Exception:
+        return ""
+
+
+def login(page, max_retries: int = 10):
     for attempt in range(1, max_retries + 1):
         try:
             page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=90000)
             page.wait_for_timeout(5000)
+            page.screenshot(path=os.path.join(ARTIFACT_DIR, f"login_page_{attempt}.png"), full_page=True)
+            save_text(f"login_page_{attempt}.txt", page_text(page))
         except Exception:
             if attempt == max_retries:
                 raise
-            page.wait_for_timeout(5000)
+            page.wait_for_timeout(4000)
             continue
 
-        best_code = solve_captcha(page)
+        best_code = solve_captcha(page, attempt_no=attempt)
         if len(best_code) != 4:
+            save_text(f"login_attempt_{attempt}_result.txt", "OCR 未得到有效 4 位验证码")
             continue
 
-        candidates = generate_code_candidates(best_code, limit=12)
+        candidates = generate_code_candidates(best_code, limit=20)
+        save_text(f"login_attempt_{attempt}_candidates.txt", "\n".join(candidates))
 
-        for cand in candidates:
+        for idx, cand in enumerate(candidates, start=1):
             try:
                 fill_login_form(page, cand)
                 page.click("text=Login")
-                page.wait_for_timeout(4000)
+                page.wait_for_timeout(4500)
 
-                body_text = page.locator("body").inner_text(timeout=8000)
+                body_text = page_text(page)
+                page.screenshot(
+                    path=os.path.join(ARTIFACT_DIR, f"login_attempt_{attempt}_{idx}_{cand}.png"),
+                    full_page=True
+                )
+                save_text(f"login_attempt_{attempt}_{idx}_{cand}.txt", body_text)
+
                 if ("统一认证中心" not in body_text) and ("Login" not in body_text):
                     return
 
-                page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=90000)
-                page.wait_for_timeout(3000)
-            except Exception:
                 try:
                     page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=90000)
-                    page.wait_for_timeout(3000)
+                    page.wait_for_timeout(2500)
+                except Exception:
+                    pass
+            except Exception as e:
+                save_text(f"login_attempt_{attempt}_{idx}_{cand}_error.txt", repr(e))
+                try:
+                    page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=90000)
+                    page.wait_for_timeout(2500)
                 except Exception:
                     pass
 
@@ -280,7 +327,7 @@ def open_mission_page(page):
             except Exception:
                 pass
 
-            body_text = page.locator("body").inner_text()
+            body_text = page_text(page)
             if re.search(r"\d{2}月\d{2}日\s*周.", body_text):
                 return
 
@@ -293,11 +340,11 @@ def open_mission_page(page):
 
 
 def get_day_headers(page):
-    text = page.locator("body").inner_text()
+    text = page_text(page)
     headers = []
     for line in text.splitlines():
         line = line.strip()
-        if re.search(r"^\d{2}月\d{2}日\s*周.", line):
+        if DAY_HEADER_RE.search(line):
             headers.append(line)
 
     seen = set()
@@ -324,7 +371,7 @@ def click_day_toggle(page, header: str) -> bool:
 def expand_day(page, header: str) -> bool:
     ok = click_day_toggle(page, header)
     if ok:
-        page.wait_for_timeout(1500)
+        page.wait_for_timeout(1800)
     return ok
 
 
@@ -349,6 +396,14 @@ def get_day_block(page, header: str, next_header: str | None):
             return body_text[start:end].strip()
 
     return body_text[start:].strip()
+
+
+def detect_page_year(page) -> int:
+    text = page_text(page)
+    m = PAGE_YEAR_MONTH_RE.search(text)
+    if m:
+        return int(m.group(1))
+    return datetime.now(SH_TZ).year
 
 
 # =========================
@@ -384,11 +439,13 @@ def task_bucket(task_type: str) -> str:
     }.get(task_type, "other")
 
 
-def extract_date(text: str):
+def extract_date(text: str, page_year: int):
     m = re.search(r'(\d{2})月(\d{2})日', text)
     if not m:
         return None
-    return datetime.now(SH_TZ).year, int(m.group(1)), int(m.group(2))
+    month = int(m.group(1))
+    day = int(m.group(2))
+    return page_year, month, day
 
 
 def is_flight_line(s: str) -> bool:
@@ -399,15 +456,22 @@ def is_reg_model_line(s: str) -> bool:
     return REG_MODEL_RE.fullmatch(s) is not None
 
 
+def clean_tail_noise(lines: list[str]) -> list[str]:
+    cleaned = []
+    for line in lines:
+        if not line:
+            continue
+        if "查看更多" in line:
+            continue
+        if PURE_DATE_PREFIX_RE.match(line):
+            continue
+        cleaned.append(line)
+    return cleaned
+
+
 def split_day_block_into_cards(day_block: str):
-    """
-    真实结构：
-    9C8946
-    B32EFA321
-    07:10 西安咸阳 航班动态
-    西安咸阳上海虹桥 09:05- 11:10
-    """
     lines = [normalize_text(x) for x in day_block.splitlines() if normalize_text(x)]
+    lines = clean_tail_noise(lines)
     if not lines:
         return []
 
@@ -415,19 +479,18 @@ def split_day_block_into_cards(day_block: str):
     for i in range(len(lines) - 1):
         line1 = lines[i]
         line2 = lines[i + 1]
-
         if is_flight_line(line1) and is_reg_model_line(line2):
             starts.append(i)
 
     cards = []
     for idx, start_i in enumerate(starts):
         end_i = starts[idx + 1] if idx + 1 < len(starts) else len(lines)
-        chunk_lines = lines[start_i:end_i]
+        chunk_lines = clean_tail_noise(lines[start_i:end_i])
         chunk = "\n".join(chunk_lines).strip()
 
         if "航班动态" not in chunk:
             continue
-        if not re.search(r"\d{2}:\d{2}\s*-\s*\d{2}:\d{2}", chunk):
+        if not TIME_RANGE_RE.search(chunk):
             continue
 
         cards.append(chunk)
@@ -451,7 +514,6 @@ def extract_flight_no(card_text: str) -> str:
     for line in lines:
         if is_flight_line(line):
             return line
-
     m = FLIGHT_NO_RE.search(card_text)
     return m.group(0) if m else ""
 
@@ -483,15 +545,15 @@ def extract_checkin(card_text: str):
 
 
 def extract_start_end_time(card_text: str):
-    ranges = re.findall(r'(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})', card_text)
+    ranges = TIME_RANGE_RE.findall(card_text)
     if ranges:
         return ranges[-1][0], ranges[-1][1]
     return "", ""
 
 
 def parse_route_cn_from_line(line: str):
-    line = re.sub(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', '', line).strip()
-    line = line.replace("→", "").replace("-", "").replace("—", "")
+    line = TIME_RANGE_RE.sub("", line).strip()
+    line = line.replace("→", "").replace("-", "").replace("—", "").replace(" ", "")
     for dep_cn in AIRPORT_NAMES:
         if line.startswith(dep_cn):
             remain = line[len(dep_cn):].strip()
@@ -508,7 +570,7 @@ def extract_airports(card_text: str):
     lines = [x.strip() for x in card_text.splitlines() if x.strip()]
     candidate_lines = []
     for line in lines:
-        if re.search(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', line) and "航班动态" not in line:
+        if TIME_RANGE_RE.search(line) and "航班动态" not in line:
             candidate_lines.append(line)
 
     if candidate_lines:
@@ -529,6 +591,21 @@ def extract_airports(card_text: str):
         return uniq[0], uniq[1], dep_cn, arr_cn
 
     return "", "", dep_cn, arr_cn
+
+
+def split_people_from_line(line: str):
+    line = normalize_text(line)
+    if not line:
+        return []
+
+    if any(x in line for x in ["查看更多", "航班动态"]):
+        return []
+
+    matches = CHINESE_NAME_RE.findall(line)
+    if matches:
+        return [m.strip() for m in matches if m.strip()]
+
+    return [line]
 
 
 def extract_people_lines(card_text: str):
@@ -554,18 +631,15 @@ def extract_people_lines(card_text: str):
             continue
         if "查看更多" in line:
             continue
-        if re.match(r'\d{4}-\d{2}-\d{2}', line):
+        if PURE_DATE_PREFIX_RE.match(line):
             continue
 
-        out.append(line)
+        pieces = split_people_from_line(line)
+        for p in pieces:
+            if p not in out:
+                out.append(p)
 
-    uniq = []
-    seen = set()
-    for x in out:
-        if x not in seen:
-            seen.add(x)
-            uniq.append(x)
-    return uniq
+    return out
 
 
 # =========================
@@ -708,7 +782,7 @@ def collect_day_blocks(page):
             day_block = get_day_block(page, header, next_header)
             cards = split_day_block_into_cards(day_block)
 
-            key = re.sub(r'[^0-9A-Za-z]+', '_', header)
+            key = safe_name(header)
             save_text(f"block_{key}.txt", day_block)
             save_text(f"cards_{key}.txt", "\n\n==========\n\n".join(cards))
 
@@ -723,7 +797,7 @@ def collect_day_blocks(page):
     return result
 
 
-def create_multi_calendars_from_blocks(day_blocks):
+def create_multi_calendars_from_blocks(day_blocks, page_year: int):
     buckets = {
         "flight": [],
         "positioning": [],
@@ -734,7 +808,7 @@ def create_multi_calendars_from_blocks(day_blocks):
     best_events = {}
 
     for day in day_blocks:
-        date_info = extract_date(day["day_header"])
+        date_info = extract_date(day["day_header"], page_year)
         if not date_info:
             continue
 
@@ -795,11 +869,11 @@ def create_multi_calendars_from_blocks(day_blocks):
     for key in buckets:
         buckets[key].sort(key=lambda x: (x["start_dt"], x["flight_no"]))
 
-    write_calendar("flight.ics", buckets["flight"])
-    write_calendar("positioning.ics", buckets["positioning"])
-    write_calendar("training.ics", buckets["training"])
-    write_calendar("ferry.ics", buckets["ferry"])
-    write_calendar("other.ics", buckets["other"])
+    write_calendar(os.path.join(ARTIFACT_DIR, "flight.ics"), buckets["flight"])
+    write_calendar(os.path.join(ARTIFACT_DIR, "positioning.ics"), buckets["positioning"])
+    write_calendar(os.path.join(ARTIFACT_DIR, "training.ics"), buckets["training"])
+    write_calendar(os.path.join(ARTIFACT_DIR, "ferry.ics"), buckets["ferry"])
+    write_calendar(os.path.join(ARTIFACT_DIR, "other.ics"), buckets["other"])
 
 
 def run():
@@ -817,18 +891,21 @@ def run():
         page.set_default_timeout(90000)
         page.set_default_navigation_timeout(90000)
 
-        login(page, max_retries=8)
+        login(page, max_retries=10)
 
         page.screenshot(path=os.path.join(ARTIFACT_DIR, "after_login.png"), full_page=True)
-        save_text("after_login.txt", page.locator("body").inner_text())
+        save_text("after_login.txt", page_text(page))
 
         open_mission_page(page)
 
         page.screenshot(path=os.path.join(ARTIFACT_DIR, "mission_page_ready.png"), full_page=True)
-        save_text("mission_body_text.txt", page.locator("body").inner_text())
+        save_text("mission_body_text.txt", page_text(page))
+
+        page_year = detect_page_year(page)
+        save_text("page_year.txt", str(page_year))
 
         day_blocks = collect_day_blocks(page)
-        create_multi_calendars_from_blocks(day_blocks)
+        create_multi_calendars_from_blocks(day_blocks, page_year)
 
         context.close()
         browser.close()
