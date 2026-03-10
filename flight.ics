@@ -2,31 +2,10 @@ BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:ics.py - http://git.io/lLljaA
 BEGIN:VEVENT
-DESCRIPTION:日期：03月14日 周六 航班 09:05- 22:40\n任务类型：航班\n航班号：9C8995\n机型：A321\n注册号：B326Q\n签到时间：14:20\n签到地点：上海虹桥\n任务时间：16:05 - 19:05\n人员类型：副驾驶\n人员名单：\n杨刚(T\,RT)鲍国际(R)段洋硕(R*)\n龚婷(B)\n兰力牛琨彭高庆得\n\n原始内容：\n9C8995\nB326QA321\n 14:20 上海虹桥 航班动态\n上海虹桥重庆江北 16:05- 19:05\n\n副驾驶\n\n杨刚(T\,RT)鲍国际(R)段洋硕(R*)\n\n龚婷(B)\n\n兰力牛琨彭高庆得
-DTEND:20260314T110500Z
-DTSTART:20260314T080500Z
-SUMMARY:✈️ 9C8995\nA321 B326Q
-UID:da8b967b-9481-483e-84b0-f1a06252adfb@da8b.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:日期：03月14日 周六 航班 09:05- 22:40\n任务类型：航班\n航班号：9C8996\n航线：ZLXY → ZSSS\n任务时间：09:05 - 22:40\n\n原始内容：\n9C8996\n咸\nZLXY\n09:05\n虹\nZSSS\n渝\nZUCK\n虹\nZSSS\n22:40
+DESCRIPTION:日期：03月14日 周六 航班 09:05- 22:40\n任务类型：航班\n航班号：9C8946\n航线：ZLXY → ZSSS\n机型：A321\n注册号：B326Q\n签到时间：07:10\n签到地点：西安咸阳\n任务时间：09:05 - 22:40\n人员类型：副驾驶\n人员名单：\n杨刚(T\,RT)段洋硕(R*)鲍国际(R)\n宋昕鸿(B)\n杨刚(T\,RT)鲍国际(R)段洋硕(R*)\n龚婷(B)\n兰力牛琨彭高庆得\n杨刚(T\,RT)鲍国际(R)段洋硕(R*)\n龚婷(B)\n\n原始内容：\n03月14日 周六 航班 09:05- 22:40\n9C8946\n9C8995\n9C8996\n咸\nZLXY\n09:05\n虹\nZSSS\n渝\nZUCK\n虹\nZSSS\n22:40\n9C8946\nB32EFA321\n 07:10 西安咸阳 航班动态\n西安咸阳上海虹桥 09:05- 11:10\n\n副驾驶\n\n杨刚(T\,RT)段洋硕(R*)鲍国际(R)\n\n宋昕鸿(B)\n\n9C8995\nB326QA321\n 14:20 上海虹桥 航班动态\n上海虹桥重庆江北 16:05- 19:05\n\n副驾驶\n\n杨刚(T\,RT)鲍国际(R)段洋硕(R*)\n\n龚婷(B)\n\n兰力牛琨彭高庆得\n\n9C8996\nB326QA321\n 18:35 重庆江北 航班动态\n重庆江北上海虹桥 20:15- 22:40\n\n副驾驶\n\n杨刚(T\,RT)鲍国际(R)段洋硕(R*)\n\n龚婷(B)\n\n2026-03-19 查看更多
 DTEND:20260314T144000Z
 DTSTART:20260314T010500Z
-SUMMARY:✈️ 9C8996 ZLXY→ZSSS
-UID:7ba790b7-1627-46f1-8ba5-7e9a6ee7050f@7ba7.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:日期：03月14日 周六 航班 09:05- 22:40\n任务类型：航班\n航班号：9C8996\n机型：A321\n注册号：B326Q\n签到时间：18:35\n签到地点：重庆江北\n任务时间：20:15 - 22:40\n人员类型：副驾驶\n人员名单：\n杨刚(T\,RT)鲍国际(R)段洋硕(R*)\n龚婷(B)\n2026-03-19 查看更多\n\n原始内容：\n9C8996\nB326QA321\n 18:35 重庆江北 航班动态\n重庆江北上海虹桥 20:15- 22:40\n\n副驾驶\n\n杨刚(T\,RT)鲍国际(R)段洋硕(R*)\n\n龚婷(B)\n\n2026-03-19 查看更多
-DTEND:20260314T144000Z
-DTSTART:20260314T121500Z
-SUMMARY:✈️ 9C8996\nA321 B326Q
-UID:8a5b39f4-a77c-4307-bf31-ab27370f065e@8a5b.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:日期：03月14日 周六 航班 09:05- 22:40\n任务类型：航班\n航班号：9C8946\n签到时间：07:10\n签到地点：西安咸阳\n任务时间：09:05 - 11:10\n人员类型：副驾驶\n人员名单：\n杨刚(T\,RT)段洋硕(R*)鲍国际(R)\n宋昕鸿(B)\n\n原始内容：\n9C8946\nB32EFA321\n 07:10 西安咸阳 航班动态\n西安咸阳上海虹桥 09:05- 11:10\n\n副驾驶\n\n杨刚(T\,RT)段洋硕(R*)鲍国际(R)\n\n宋昕鸿(B)
-DTEND:20260314T031000Z
-DTSTART:20260314T010500Z
-SUMMARY:✈️ 9C8946
-UID:bec92ad8-315c-4f0a-b79a-c4c62ac4eba7@bec9.org
+SUMMARY:✈️ 9C8946 ZLXY→ZSSS\nA321 B326Q
+UID:6fe051a5-1bfd-4a81-b638-93aad157cdc0@6fe0.org
 END:VEVENT
 END:VCALENDAR
