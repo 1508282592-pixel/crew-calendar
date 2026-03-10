@@ -397,46 +397,38 @@ def is_reg_model_line(s: str) -> bool:
     return re.fullmatch(r'B\d{3,4}[A-Z]{0,2}A(319|320|321)', s) is not None
 
 
-def split_day_block_into_cards(day_block: str):
-    """
-    真实文本结构：
-    9C8946
-    B32EFA321
-    07:10 西安咸阳 航班动态
-    西安咸阳上海虹桥 09:05- 11:10
-    ...
-    所以只认：
-    “航班号单独一行” + “下一行是注册号机型”
-    """
-    lines = [normalize_text(x) for x in day_block.splitlines() if normalize_text(x)]
-    if not lines:
-        return []
+def run():
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        context = browser.new_context(
+            viewport={"width": 1400, "height": 1000},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            )
+        )
+        page = context.new_page()
+        page.set_default_timeout(90000)
+        page.set_default_navigation_timeout(90000)
 
-    starts = []
-    for i in range(len(lines) - 1):
-        if is_flight_line(lines[i]) and is_reg_model_line(lines[i + 1]):
-            starts.append(i)
+        login(page, max_retries=8)
 
-    cards = []
-    for idx, start_i in enumerate(starts):
-        end_i = starts[idx + 1] if idx + 1 < len(starts) else len(lines)
-        chunk_lines = lines[start_i:end_i]
-        chunk = "\n".join(chunk_lines).strip()
+        # 登录后保存一次页面，便于排查
+        page.screenshot(path=os.path.join(ARTIFACT_DIR, "after_login.png"), full_page=True)
+        save_text("after_login.txt", page.locator("body").inner_text())
 
-        if "航班动态" not in chunk:
-            continue
-        if not re.search(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', chunk):
-            continue
+        open_mission_page(page)
 
-        cards.append(chunk)
+        # 进入任务页后再保存一次
+        page.screenshot(path=os.path.join(ARTIFACT_DIR, "mission_page_ready.png"), full_page=True)
+        save_text("mission_body_text.txt", page.locator("body").inner_text())
 
-    uniq = []
-    seen = set()
-    for c in cards:
-        if c not in seen:
-            seen.add(c)
-            uniq.append(c)
-    return uniq
+        day_blocks = collect_day_blocks(page)
+        create_multi_calendars_from_blocks(day_blocks)
+
+        context.close()
+        browser.close()
 
 
 # =========================
