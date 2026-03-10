@@ -351,16 +351,28 @@ def is_flight_line(line: str) -> bool:
     return re.fullmatch(r'9C\d{3,4}[A-Z]?', line.strip()) is not None
 
 
+def looks_like_start_line(line: str) -> bool:
+    line = line.strip()
+    patterns = [
+        r'^9C\d{3,4}[A-Z]?\s*$',
+        r'^9C\d{3,4}[A-Z]?\s+B\d{3,4}[A-Z]{0,2}\s*\|\s*A3\d{2}\s*$',
+        r'^9C\d{3,4}[A-Z]?\s+B\d{3,4}[A-Z]{0,2}\s+A3\d{2}\s*$',
+        r'^9C\d{3,4}[A-Z]?B\d{3,4}[A-Z]{0,2}A3\d{2}\s*$',
+    ]
+    return any(re.fullmatch(p, line) for p in patterns)
+
+
 def is_reg_model_line(line: str) -> bool:
-    return re.fullmatch(r'B\d{3,4}[A-Z]{0,2}A3\d{2}', line.strip()) is not None
+    line = line.strip()
+    patterns = [
+        r'^B\d{3,4}[A-Z]{0,2}A3\d{2}$',
+        r'^B\d{3,4}[A-Z]{0,2}\s*\|\s*A3\d{2}$',
+        r'^B\d{3,4}[A-Z]{0,2}\s+A3\d{2}$',
+    ]
+    return any(re.fullmatch(p, line) for p in patterns)
 
 
 def split_day_entry_into_detailed_segments(day_entry: str):
-    """
-    详细段起点支持两种：
-    1. 当前行是航班号，下一行是注册号+机型
-    2. 当前行本身就是 航班号+注册号+机型 连在一起
-    """
     lines = [x.strip() for x in day_entry.splitlines() if x.strip()]
     if not lines:
         return []
@@ -371,15 +383,12 @@ def split_day_entry_into_detailed_segments(day_entry: str):
     for i in range(1, len(lines)):
         line = lines[i]
 
-        # 形式1：9C8946 下一行 B32EFA321
         if i + 1 < len(lines) and is_flight_line(line) and is_reg_model_line(lines[i + 1]):
             starts.append(i)
             continue
 
-        # 形式2：9C8946B32EFA321
-        if re.fullmatch(r'9C\d{3,4}[A-Z]?B\d{3,4}[A-Z]{0,2}A3\d{2}', line):
+        if looks_like_start_line(line):
             starts.append(i)
-            continue
 
     starts = sorted(set(starts))
 
@@ -404,7 +413,7 @@ def extract_flight_no(segment: str) -> str:
         if is_flight_line(line):
             return line
 
-        m = re.match(r'(9C\d{3,4}[A-Z]?)B\d{3,4}[A-Z]{0,2}A3\d{2}', line)
+        m = re.match(r'(9C\d{3,4}[A-Z]?)', line)
         if m:
             return m.group(1)
 
@@ -413,13 +422,15 @@ def extract_flight_no(segment: str) -> str:
 
 
 def extract_reg_and_model(segment: str):
-    m_combo = re.search(r'(B\d{3,4}[A-Z]{0,2})(A3\d{2})', segment)
-    if m_combo:
-        return m_combo.group(1), m_combo.group(2)
-
-    m_combo2 = re.search(r'9C\d{3,4}[A-Z]?(B\d{3,4}[A-Z]{0,2})(A3\d{2})', segment)
-    if m_combo2:
-        return m_combo2.group(1), m_combo2.group(2)
+    patterns = [
+        r'(B\d{3,4}[A-Z]{0,2})(A3\d{2})',
+        r'(B\d{3,4}[A-Z]{0,2})\s*\|\s*(A3\d{2})',
+        r'(B\d{3,4}[A-Z]{0,2})\s+(A3\d{2})',
+    ]
+    for p in patterns:
+        m = re.search(p, segment)
+        if m:
+            return m.group(1), m.group(2)
 
     reg = ""
     model = ""
