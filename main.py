@@ -242,7 +242,7 @@ def login(page, max_retries: int = 8):
 
 
 # =========================
-# 页面采集：逐天展开、逐天收起
+# 页面采集
 # =========================
 
 def open_mission_page(page):
@@ -271,7 +271,6 @@ def get_task_header_lines(page):
 def collect_day_entries_one_by_one(page):
     """
     一天一条展开，一天一条收起。
-    只取当前天自己的块。
     """
     day_entries = []
     header_lines = get_task_header_lines(page)
@@ -357,13 +356,7 @@ def extract_date(text: str):
 
 def split_day_entry_into_detailed_segments(day_entry: str):
     """
-    只拆出真正详细航段。
-    详细航段必须至少满足：
-    - 以独立 9Cxxxx 行开始
-    - 段内有 航班动态
-    - 段内有 B注册号+机型
-    - 段内有一条 xx:xx-xx:xx
-    这样顶部摘要里的裸航班号就不会被当成事件。
+    只保留真正详细航段，过滤顶部摘要。
     """
     lines = [x.strip() for x in day_entry.splitlines() if x.strip()]
     if not lines:
@@ -434,10 +427,6 @@ def extract_checkin(segment: str):
 
 
 def extract_start_end_time(segment: str):
-    """
-    取当前航段自己的时间区间。
-    优先取最后一个时间区间，因为详细段最后那组通常就是本航段。
-    """
     ranges = re.findall(r'(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})', segment)
     if ranges:
         return ranges[-1][0], ranges[-1][1]
@@ -450,144 +439,4 @@ def parse_route_cn_from_line(line: str):
         if line.startswith(dep_cn):
             remain = line[len(dep_cn):]
             for arr_cn in AIRPORT_NAMES:
-                if remain == arr_cn:
-                    return dep_cn, arr_cn
-    return "", ""
-
-
-def extract_airports(segment: str):
-    """
-    优先从中文航线行里取出当前航段自己的起终点。
-    再映射成 ICAO。
-    """
-    dep_cn = ""
-    arr_cn = ""
-
-    lines = [x.strip() for x in segment.splitlines() if x.strip()]
-    candidate_lines = []
-    for line in lines:
-        if re.search(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', line) and "航班动态" not in line:
-            candidate_lines.append(line)
-
-    if candidate_lines:
-        dep_cn, arr_cn = parse_route_cn_from_line(candidate_lines[-1])
-
-    dep = AIRPORT_CN_TO_ICAO.get(dep_cn, "")
-    arr = AIRPORT_CN_TO_ICAO.get(arr_cn, "")
-
-    if dep and arr:
-        return dep, arr, dep_cn, arr_cn
-
-    # 兜底：直接抓 ICAO
-    codes = re.findall(r'\b[A-Z]{4}\b', segment)
-    uniq = []
-    for c in codes:
-        if c not in uniq:
-            uniq.append(c)
-    if len(uniq) >= 2:
-        return uniq[0], uniq[1], dep_cn, arr_cn
-
-    return "", "", dep_cn, arr_cn
-
-
-def extract_people_type(segment: str):
-    for t in ["随机人员", "乘务长", "副驾驶", "机长"]:
-        if t in segment:
-            return t
-    return ""
-
-
-def extract_people_lines(segment: str):
-    lines = [x.strip() for x in segment.splitlines() if x.strip()]
-    out = []
-
-    capture = False
-    for line in lines:
-        if line in ["随机人员", "乘务长", "副驾驶", "机长"]:
-            capture = True
-            continue
-
-        if not capture:
-            continue
-
-        if "航班动态" in line:
-            continue
-        if re.fullmatch(r'9C\d{3,4}[A-Z]?', line):
-            continue
-        if re.search(r'\b[A-Z]{4}\b', line):
-            continue
-        if re.search(r'\d{2}:\d{2}', line):
-            continue
-        if re.search(r'^B\d{3,4}', line):
-            continue
-        if "查看更多" in line:
-            continue
-        if re.match(r'\d{4}-\d{2}-\d{2}', line):
-            continue
-
-        out.append(line)
-
-    seen = set()
-    uniq = []
-    for x in out:
-        if x not in seen:
-            seen.add(x)
-            uniq.append(x)
-    return uniq
-
-
-# =========================
-# 事件模板
-# =========================
-
-def build_title(task_type, flight_no, dep, arr, dep_cn, arr_cn):
-    icon = detect_icon(task_type)
-
-    if flight_no and dep and arr:
-        return f"{icon} {flight_no} {dep}→{arr}"
-    if flight_no and dep_cn and arr_cn:
-        return f"{icon} {flight_no} {dep_cn}→{arr_cn}"
-    if flight_no:
-        return f"{icon} {flight_no}"
-    return f"{icon} {task_type}"
-
-
-def build_description(item: dict) -> str:
-    fr24_number = fr24_flight_code(item["flight_no"]) if item["flight_no"] else ""
-
-    lines = []
-    lines.append(f"日期：{item['day_header']}")
-    lines.append(f"任务类型：{item['task_type']}")
-    lines.append(f"航班号：{item['flight_no']}")
-
-    if item["dep"] or item["arr"]:
-        lines.append(f"航线：{item['dep']} → {item['arr']}")
-    if item["dep_cn"] or item["arr_cn"]:
-        lines.append(f"中文航线：{item['dep_cn']} → {item['arr_cn']}")
-
-    if item["checkin_time"]:
-        lines.append(f"签到时间：{item['checkin_time']}")
-    if item["checkin_place"]:
-        lines.append(f"签到地点：{item['checkin_place']}")
-
-    lines.append(f"任务时间：{item['start_time']} - {item['end_time']}")
-
-    if item["model"]:
-        lines.append(f"机型：{item['model']}")
-    if item["reg"]:
-        lines.append(f"注册号：{item['reg']}")
-
-    if item["people_type"]:
-        lines.append("")
-        lines.append(f"人员类型：{item['people_type']}")
-
-    if item["people_lines"]:
-        lines.append("人员名单：")
-        for p in item["people_lines"]:
-            lines.append(p)
-
-    if fr24_number:
-        lines.append("")
-        lines.append(f"航班追踪：https://www.flightradar24.com/data/flights/{fr24_number}")
-    if item["reg"]:
-        lines.append(f"机号信息：https://www.flightradar24.com/data/
+                if remain
