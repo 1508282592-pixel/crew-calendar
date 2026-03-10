@@ -357,9 +357,9 @@ def is_reg_model_line(line: str) -> bool:
 
 def split_day_entry_into_detailed_segments(day_entry: str):
     """
-    只有当“航班号行”的下一行就是“注册号+机型”时，
-    才认定这是真正详细航段的开始。
-    这样可以彻底跳过顶部摘要里的 9C8946 / 9C8995 / 9C8996。
+    详细段起点支持两种：
+    1. 当前行是航班号，下一行是注册号+机型
+    2. 当前行本身就是 航班号+注册号+机型 连在一起
     """
     lines = [x.strip() for x in day_entry.splitlines() if x.strip()]
     if not lines:
@@ -368,9 +368,20 @@ def split_day_entry_into_detailed_segments(day_entry: str):
     header = lines[0]
     starts = []
 
-    for i in range(1, len(lines) - 1):
-        if is_flight_line(lines[i]) and is_reg_model_line(lines[i + 1]):
+    for i in range(1, len(lines)):
+        line = lines[i]
+
+        # 形式1：9C8946 下一行 B32EFA321
+        if i + 1 < len(lines) and is_flight_line(line) and is_reg_model_line(lines[i + 1]):
             starts.append(i)
+            continue
+
+        # 形式2：9C8946B32EFA321
+        if re.fullmatch(r'9C\d{3,4}[A-Z]?B\d{3,4}[A-Z]{0,2}A3\d{2}', line):
+            starts.append(i)
+            continue
+
+    starts = sorted(set(starts))
 
     segments = []
     for idx, start_i in enumerate(starts):
@@ -392,6 +403,11 @@ def extract_flight_no(segment: str) -> str:
         line = line.strip()
         if is_flight_line(line):
             return line
+
+        m = re.match(r'(9C\d{3,4}[A-Z]?)B\d{3,4}[A-Z]{0,2}A3\d{2}', line)
+        if m:
+            return m.group(1)
+
     m = re.search(r'\b9C\d{3,4}[A-Z]?\b', segment)
     return m.group(0) if m else ""
 
@@ -400,6 +416,10 @@ def extract_reg_and_model(segment: str):
     m_combo = re.search(r'(B\d{3,4}[A-Z]{0,2})(A3\d{2})', segment)
     if m_combo:
         return m_combo.group(1), m_combo.group(2)
+
+    m_combo2 = re.search(r'9C\d{3,4}[A-Z]?(B\d{3,4}[A-Z]{0,2})(A3\d{2})', segment)
+    if m_combo2:
+        return m_combo2.group(1), m_combo2.group(2)
 
     reg = ""
     model = ""
@@ -525,13 +545,13 @@ def build_description(item: dict) -> str:
     fr24_number = fr24_flight_code(item["flight_no"]) if item["flight_no"] else ""
 
     lines = []
-    lines.append(f"日期：{item['day_header']}")
+    lines.append(f"{item['day_header']}")
     lines.append(f"航班号：{item['flight_no']}")
 
     if item["dep"] or item["arr"]:
         lines.append(f"航线：{item['dep']} → {item['arr']}")
     if item["dep_cn"] or item["arr_cn"]:
-        lines.append(f"中文航线：{item['dep_cn']} → {item['arr_cn']}")
+        lines.append(f"航线：{item['dep_cn']} → {item['arr_cn']}")
 
     if item["checkin_time"]:
         lines.append(f"签到时间：{item['checkin_time']}")
