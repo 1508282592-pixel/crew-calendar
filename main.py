@@ -408,6 +408,13 @@ def detect_page_year(page) -> int:
 # 任务识别
 # =========================
 
+def detect_task_type(text: str) -> str:
+    for t in ["置位", "航班", "训练", "摆渡", "备份", "待命", "考勤"]:
+        if t in text:
+            return t
+    return "任务"
+
+
 def task_bucket(task_type: str) -> str:
     return {
         "航班": "flight",
@@ -625,19 +632,38 @@ def extract_people_lines(card_text: str):
 # ICS 输出
 # =========================
 
+def title_icon(task_type: str) -> str:
+    return {
+        "航班": "✈️",
+        "置位": "📍",
+        "训练": "🎓",
+        "摆渡": "🚐",
+        "备份": "🗂",
+        "待命": "🕒",
+        "考勤": "📋",
+        "任务": "🗂",
+    }.get(task_type, "🗂")
+
+
 def build_title(task_type, flight_no, dep, arr, dep_cn, arr_cn):
+    icon = title_icon(task_type)
+
     if flight_no and dep_cn and arr_cn:
-        return f"✈️ {flight_no} {dep_cn}→{arr_cn}"
+        return f"{icon} {flight_no} {dep_cn}→{arr_cn}"
     if flight_no and dep and arr:
-        return f"✈️ {flight_no} {dep}→{arr}"
+        return f"{icon} {flight_no} {dep}→{arr}"
     if flight_no:
-        return f"✈️ {flight_no}"
-    return "✈️ 航班"
+        return f"{icon} {flight_no}"
+    return f"{icon} {task_type}"
 
 
 def build_description(item: dict) -> str:
     lines = []
     lines.append(item["day_header"])
+
+    if item["task_type"] != "航班":
+        lines.append(f"类型：{item['task_type']}")
+
     lines.append(f"航班：{item['flight_no']}")
 
     if item["dep_cn"] or item["arr_cn"]:
@@ -748,6 +774,7 @@ def collect_day_blocks(page):
         try:
             day_block = get_day_block(page, header, next_header)
             cards = split_day_block_into_cards(day_block)
+            raw_task_type = detect_task_type(day_block)
 
             key = safe_name(header)
             save_text(f"block_{key}.txt", day_block)
@@ -755,7 +782,7 @@ def collect_day_blocks(page):
 
             result.append({
                 "day_header": header,
-                "task_type": "航班",
+                "task_type": raw_task_type,
                 "cards": cards,
             })
         finally:
@@ -836,14 +863,12 @@ def create_multi_calendars_from_blocks(day_blocks, page_year: int):
     for key in buckets:
         buckets[key].sort(key=lambda x: (x["start_dt"], x["flight_no"]))
 
-    # 关键修复：ics 写回仓库根目录，GitHub 订阅地址才能更新
     write_calendar("flight.ics", buckets["flight"])
     write_calendar("positioning.ics", buckets["positioning"])
     write_calendar("training.ics", buckets["training"])
     write_calendar("ferry.ics", buckets["ferry"])
     write_calendar("other.ics", buckets["other"])
 
-    # 额外保留一份到 debug_output，方便你查
     write_calendar(os.path.join(ARTIFACT_DIR, "flight.ics"), buckets["flight"])
     write_calendar(os.path.join(ARTIFACT_DIR, "positioning.ics"), buckets["positioning"])
     write_calendar(os.path.join(ARTIFACT_DIR, "training.ics"), buckets["training"])
