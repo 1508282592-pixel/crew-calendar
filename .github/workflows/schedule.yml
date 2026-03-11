@@ -1,28 +1,23 @@
-name: crew-calendar
-
-permissions:
-  contents: write
+name: Update crew calendar
 
 on:
-  workflow_dispatch:
   schedule:
     - cron: '0 10 * * *'
     - cron: '0 11 * * *'
+  workflow_dispatch:
 
 jobs:
-  run:
+  update-calendar:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          persist-credentials: true
 
       - name: Install Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Install system packages
         run: |
@@ -30,28 +25,24 @@ jobs:
           sudo apt-get install -y tesseract-ocr
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
 
       - name: Install Playwright
-        run: playwright install --with-deps chromium
+        run: |
+          python -m playwright install chromium
 
       - name: Run script
-        run: python main.py
         env:
           USERNAME: ${{ secrets.USERNAME }}
           PASSWORD: ${{ secrets.PASSWORD }}
-
-      - name: Upload debug artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: crew-debug
-          path: debug_output/
+        run: |
+          python main.py
 
       - name: Commit calendars
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add flight.ics positioning.ics training.ics ferry.ics other.ics
-          git diff --cached --quiet || git commit -m "update calendars"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add *.ics debug_output/* || true
+          git diff --cached --quiet || git commit -m "Update crew calendars"
           git push
