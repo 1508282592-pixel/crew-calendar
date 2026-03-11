@@ -85,10 +85,6 @@ def format_dt_local(dt: datetime) -> str:
     return dt.strftime("%Y%m%dT%H%M%S")
 
 
-def fr24_flight_code(flight_number: str) -> str:
-    return re.sub(r"[A-Za-z]$", "", flight_number.strip())
-
-
 def make_datetime(year: int, month: int, day: int, hhmm: str) -> datetime:
     hh, mm = map(int, hhmm.split(":"))
     return datetime(year, month, day, hh, mm, tzinfo=SH_TZ)
@@ -412,26 +408,6 @@ def detect_page_year(page) -> int:
 # 任务识别
 # =========================
 
-def detect_task_type(text: str) -> str:
-    for t in ["置位", "航班", "训练", "摆渡", "备份", "待命", "考勤"]:
-        if t in text:
-            return t
-    return "任务"
-
-
-def detect_icon(task_type: str) -> str:
-    return {
-        "航班": "✈️",
-        "置位": "📍",
-        "训练": "🎓",
-        "摆渡": "🚐",
-        "备份": "🗂",
-        "待命": "🕒",
-        "考勤": "📋",
-        "任务": "🗂",
-    }.get(task_type, "🗂")
-
-
 def task_bucket(task_type: str) -> str:
     return {
         "航班": "flight",
@@ -651,20 +627,16 @@ def extract_people_lines(card_text: str):
 # =========================
 
 def build_title(task_type, flight_no, dep, arr, dep_cn, arr_cn):
-    icon = detect_icon(task_type)
-
     if flight_no and dep_cn and arr_cn:
-        return f"{icon} {flight_no} {dep_cn}→{arr_cn}"
+        return f"✈️ {flight_no} {dep_cn}→{arr_cn}"
     if flight_no and dep and arr:
-        return f"{icon} {flight_no} {dep}→{arr}"
+        return f"✈️ {flight_no} {dep}→{arr}"
     if flight_no:
-        return f"{icon} {flight_no}"
-    return f"{icon} {task_type}"
+        return f"✈️ {flight_no}"
+    return "✈️ 航班"
 
 
 def build_description(item: dict) -> str:
-    fr24_number = fr24_flight_code(item["flight_no"]) if item["flight_no"] else ""
-
     lines = []
     lines.append(item["day_header"])
     lines.append(f"航班：{item['flight_no']}")
@@ -697,14 +669,6 @@ def build_description(item: dict) -> str:
         for p in item["people_lines"]:
             lines.append(f"• {p}")
 
-    if fr24_number or item["reg"]:
-        lines.append("")
-        lines.append("链接：")
-        if fr24_number:
-            lines.append(f"• 航班追踪：https://www.flightradar24.com/data/flights/{fr24_number}")
-        if item["reg"]:
-            lines.append(f"• 机号信息：https://www.flightradar24.com/data/aircraft/{item['reg']}")
-
     return "\n".join(lines)
 
 
@@ -714,7 +678,6 @@ def build_vevent(item: dict) -> str:
         item["dep_cn"], item["arr_cn"]
     )
     desc = build_description(item)
-
     alarm_desc = f"{item['flight_no']} 签到提醒" if item["flight_no"] else "签到提醒"
 
     return "\n".join([
@@ -793,7 +756,7 @@ def collect_day_blocks(page):
 
             result.append({
                 "day_header": header,
-                "task_type": detect_task_type(header),
+                "task_type": "航班",
                 "cards": cards,
             })
         finally:
