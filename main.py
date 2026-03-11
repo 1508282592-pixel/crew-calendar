@@ -579,7 +579,6 @@ def split_people_from_line(line: str):
     if any(x in line for x in ["查看更多", "航班动态"]):
         return []
 
-    # 只有存在括号备注时才拆分，避免纯中文连写误切
     if "(" in line and ")" in line:
         matches = re.findall(r"[\u4e00-\u9fff]{2,4}\([^)]*\)", line)
         if matches:
@@ -837,6 +836,14 @@ def create_multi_calendars_from_blocks(day_blocks, page_year: int):
     for key in buckets:
         buckets[key].sort(key=lambda x: (x["start_dt"], x["flight_no"]))
 
+    # 关键修复：ics 写回仓库根目录，GitHub 订阅地址才能更新
+    write_calendar("flight.ics", buckets["flight"])
+    write_calendar("positioning.ics", buckets["positioning"])
+    write_calendar("training.ics", buckets["training"])
+    write_calendar("ferry.ics", buckets["ferry"])
+    write_calendar("other.ics", buckets["other"])
+
+    # 额外保留一份到 debug_output，方便你查
     write_calendar(os.path.join(ARTIFACT_DIR, "flight.ics"), buckets["flight"])
     write_calendar(os.path.join(ARTIFACT_DIR, "positioning.ics"), buckets["positioning"])
     write_calendar(os.path.join(ARTIFACT_DIR, "training.ics"), buckets["training"])
