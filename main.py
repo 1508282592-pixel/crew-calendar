@@ -35,6 +35,8 @@ AIRPORT_CN_TO_ICAO = {
     "呼和浩特白塔": "ZBHH",
     "长春龙嘉": "ZYCC",
     "兰州中川": "ZLLL",
+    "广州白云": "ZGGG",
+    "揭阳潮汕": "ZGOW",
 }
 
 AIRPORT_NAMES = sorted(AIRPORT_CN_TO_ICAO.keys(), key=len, reverse=True)
@@ -50,7 +52,7 @@ TIME_RANGE_RE = re.compile(r"(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})")
 PAGE_YEAR_MONTH_RE = re.compile(r"(\d{4})年(\d{1,2})月")
 PURE_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
-# 人员名单兼容：中文姓名 + 括号；英文/外籍大写姓名 + 括号
+# 人员名单兼容
 CHINESE_PERSON_RE = re.compile(r"[\u4e00-\u9fff]{2,4}\([^)]*\)")
 LATIN_PERSON_RE = re.compile(r"[A-Z][A-Z\s\.\-']{1,80}\([^)]*\)")
 
@@ -445,6 +447,23 @@ def is_reg_model_line(s: str) -> bool:
     return REG_MODEL_RE.fullmatch(s) is not None
 
 
+def is_old_style_header_line(s: str) -> bool:
+    s = normalize_text(s)
+    return re.fullmatch(r"9C\d{3,4}[A-Z]?\s+B[0-9A-Z]{4,5}\s+A(?:319|320|321)", s) is not None
+
+
+def extract_old_style_header(line: str):
+    line = normalize_text(line)
+    m = re.match(r"^(9C\d{3,4}[A-Z]?)\s+(B[0-9A-Z]{4,5})\s+(A319|A320|A321)$", line)
+    if not m:
+        return None
+    return {
+        "flight_no": m.group(1),
+        "reg": m.group(2),
+        "model": m.group(3),
+    }
+
+
 def clean_tail_noise(lines: list[str]) -> list[str]:
     cleaned = []
     for line in lines:
@@ -465,21 +484,47 @@ def split_day_block_into_cards(day_block: str):
         return []
 
     starts = []
-    for i in range(len(lines) - 1):
-        line1 = lines[i]
-        line2 = lines[i + 1]
-        if is_flight_line(line1) and is_reg_model_line(line2):
+    for i in range(len(lines)):
+        line = lines[i]
+
+        # 新版结构：
+        # 9C8946
+        # B32EFA321
+        if i + 1 < len(lines):
+            if is_flight_line(line) and is_reg_model_line(lines[i + 1]):
+                starts.append(i)
+                continue
+
+        # 旧版结构：
+        # 9C6721 B8591 A320
+        if extract_old_style_header(line):
             starts.append(i)
+            continue
+
+    starts = sorted(set(starts))
+    if not starts:
+        return []
 
     cards = []
     for idx, start_i in enumerate(starts):
         end_i = starts[idx + 1] if idx + 1 < len(starts) else len(lines)
         chunk_lines = clean_tail_noise(lines[start_i:end_i])
-        chunk = "\n".join(chunk_lines).strip()
 
-        if "航班动态" not in chunk:
+        filtered = []
+        for line in chunk_lines:
+            # 顶部汇总行：9C6721 9C6722 9C7367
+            if re.fullmatch(r"(9C\d{3,4}[A-Z]?\s*){2,}", line):
+                continue
+            filtered.append(line)
+
+        chunk = "\n".join(filtered).strip()
+        if not chunk:
             continue
+
         if not TIME_RANGE_RE.search(chunk):
+            continue
+
+        if not extract_flight_no(chunk):
             continue
 
         cards.append(chunk)
@@ -500,9 +545,15 @@ def split_day_block_into_cards(day_block: str):
 
 def extract_flight_no(card_text: str) -> str:
     lines = [normalize_text(x) for x in card_text.splitlines() if normalize_text(x)]
+
     for line in lines:
         if is_flight_line(line):
             return line
+
+        m = re.match(r"(9C\d{3,4}[A-Z]?)\s+B[0-9A-Z]{4,5}\s+A(?:319|A320|A321)", line)
+        if m:
+            return m.group(1)
+
     m = FLIGHT_NO_RE.search(card_text)
     return m.group(0) if m else ""
 
@@ -511,6 +562,10 @@ def extract_reg_and_model(card_text: str):
     m = REG_AND_MODEL_RE.search(card_text)
     if m:
         return m.group(1), m.group(2)
+
+    m_old = re.search(r"9C\d{3,4}[A-Z]?\s+(B[0-9A-Z]{4,5})\s+(A319|A320|A321)", card_text)
+    if m_old:
+        return m_old.group(1), m_old.group(2)
 
     reg = ""
     model = ""
@@ -527,9 +582,27 @@ def extract_reg_and_model(card_text: str):
 
 
 def extract_checkin(card_text: str):
+    # 新版
     m = re.search(r'(\d{2}:\d{2})\s*([^\s]+)\s*航班动态', card_text)
     if m:
         return m.group(1), m.group(2)
+
+    # 旧版：常见 “06:45 上海虹桥”
+    lines = [normalize_text(x) for x in card_text.splitlines() if normalize_text(x)]
+    for line in lines:
+        m_old = re.search(r'(\d{2}:\d{2})\s+([^\s]{2,20})', line)
+        if not m_old:
+            continue
+        hhmm = m_old.group(1)
+        place = m_old.group(2)
+        if f"{hhmm}-" in line:
+            continue
+        if place in ["A319", "A320", "A321"]:
+            continue
+        if FLIGHT_NO_RE.fullmatch(place):
+            continue
+        return hhmm, place
+
     return "", ""
 
 
@@ -592,24 +665,25 @@ def split_people_from_line(line: str):
 
     results = []
 
+    # 中文姓名 + 括号
     zh_matches = CHINESE_PERSON_RE.findall(line)
     for m in zh_matches:
         m = m.strip()
         if m and m not in results:
             results.append(m)
 
+    # 英文/外籍大写姓名 + 括号
     en_matches = LATIN_PERSON_RE.findall(line)
     for m in en_matches:
         m = re.sub(r"\s+", " ", m).strip()
         if m and m not in results:
             results.append(m)
 
-    if ("(" in line and ")" in line) and not results:
-        return [line]
-
+    # 有结构化名字，就返回
     if results:
         return results
 
+    # 无括号中文长串整行保留，避免错误切分
     return [line]
 
 
@@ -632,7 +706,9 @@ def extract_people_lines(card_text: str):
             continue
         if is_reg_model_line(line):
             continue
-        if re.search(r'\d{2}:\d{2}', line):
+        if is_old_style_header_line(line):
+            continue
+        if re.search(r'\d{2}:\d{2}', line) and ("签到" not in line):
             continue
         if "查看更多" in line:
             continue
