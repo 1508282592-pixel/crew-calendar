@@ -47,7 +47,6 @@ REG_MODEL_RE = re.compile(r"^B[0-9A-Z]{4,5}A(?:319|320|321)$")
 REG_AND_MODEL_RE = re.compile(r"\b(B[0-9A-Z]{4,5})(A319|A320|A321)\b")
 REG_ONLY_RE = re.compile(r"\bB[0-9A-Z]{4,5}\b")
 TIME_RANGE_RE = re.compile(r"(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})")
-DAY_HEADER_RE = re.compile(r"^\d{2}月\d{2}日\s*周.")
 PAGE_YEAR_MONTH_RE = re.compile(r"(\d{4})年(\d{1,2})月")
 PURE_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
@@ -342,9 +341,13 @@ def get_day_headers(page):
     text = page_text(page)
     headers = []
     for line in text.splitlines():
-        line = line.strip()
-        if DAY_HEADER_RE.search(line):
-            headers.append(line)
+        line = normalize_text(line)
+        if not line:
+            continue
+
+        m = re.match(r"^(\d{2}月\d{2}日\s*周.)", line)
+        if m:
+            headers.append(m.group(1))
 
     seen = set()
     out = []
@@ -650,10 +653,10 @@ def extract_people_lines(card_text: str):
 def build_title(task_type, flight_no, dep, arr, dep_cn, arr_cn):
     icon = detect_icon(task_type)
 
-    if flight_no and dep and arr:
-        return f"{icon} {flight_no} {dep}→{arr}"
     if flight_no and dep_cn and arr_cn:
         return f"{icon} {flight_no} {dep_cn}→{arr_cn}"
+    if flight_no and dep and arr:
+        return f"{icon} {flight_no} {dep}→{arr}"
     if flight_no:
         return f"{icon} {flight_no}"
     return f"{icon} {task_type}"
@@ -664,37 +667,43 @@ def build_description(item: dict) -> str:
 
     lines = []
     lines.append(item["day_header"])
-    lines.append(f"航班号：{item['flight_no']}")
+    lines.append(f"航班：{item['flight_no']}")
 
     if item["dep_cn"] or item["arr_cn"]:
         lines.append(f"航线：{item['dep_cn']} → {item['arr_cn']}")
     elif item["dep"] or item["arr"]:
         lines.append(f"航线：{item['dep']} → {item['arr']}")
 
-    if item["checkin_time"]:
-        lines.append(f"签到时间：{item['checkin_time']}")
-    if item["checkin_place"]:
+    if item["checkin_time"] and item["checkin_place"]:
+        lines.append(f"签到：{item['checkin_time']}｜{item['checkin_place']}")
+    elif item["checkin_time"]:
+        lines.append(f"签到：{item['checkin_time']}")
+    elif item["checkin_place"]:
         lines.append(f"签到地点：{item['checkin_place']}")
 
-    lines.append(f"任务时间：{item['start_time']} - {item['end_time']}")
+    if item["start_time"] and item["end_time"]:
+        lines.append(f"任务：{item['start_time']} - {item['end_time']}")
 
-    if item["model"]:
+    if item["model"] and item["reg"]:
+        lines.append(f"机型：{item['model']}｜注册号：{item['reg']}")
+    elif item["model"]:
         lines.append(f"机型：{item['model']}")
-    if item["reg"]:
+    elif item["reg"]:
         lines.append(f"注册号：{item['reg']}")
 
     if item["people_lines"]:
         lines.append("")
         lines.append("人员名单：")
         for p in item["people_lines"]:
-            lines.append(p)
+            lines.append(f"• {p}")
 
-    if fr24_number:
+    if fr24_number or item["reg"]:
         lines.append("")
-        lines.append(f"航班追踪：https://www.flightradar24.com/data/flights/{fr24_number}")
-
-    if item["reg"]:
-        lines.append(f"机号信息：https://www.flightradar24.com/data/aircraft/{item['reg']}")
+        lines.append("链接：")
+        if fr24_number:
+            lines.append(f"• 航班追踪：https://www.flightradar24.com/data/flights/{fr24_number}")
+        if item["reg"]:
+            lines.append(f"• 机号信息：https://www.flightradar24.com/data/aircraft/{item['reg']}")
 
     return "\n".join(lines)
 
@@ -706,23 +715,18 @@ def build_vevent(item: dict) -> str:
     )
     desc = build_description(item)
 
-    uid = (
-        f'{item["task_type"]}-'
-        f'{item["flight_no"]}-'
-        f'{format_dt_local(item["start_dt"])}-'
-        f'{format_dt_local(item["end_dt"])}@crew-calendar'
-    )
+    alarm_desc = f"{item['flight_no']} 签到提醒" if item["flight_no"] else "签到提醒"
 
     return "\n".join([
         "BEGIN:VEVENT",
-        f"UID:{uid}",
+        f"UID:{item['task_type']}-{item['flight_no']}-{format_dt_local(item['start_dt'])}-{format_dt_local(item['end_dt'])}@crew-calendar",
         f"SUMMARY:{escape_ics_text(title)}",
         f"DTSTART;TZID=Asia/Shanghai:{format_dt_local(item['start_dt'])}",
         f"DTEND;TZID=Asia/Shanghai:{format_dt_local(item['end_dt'])}",
         f"DESCRIPTION:{escape_ics_text(desc)}",
         "BEGIN:VALARM",
         "TRIGGER:-PT90M",
-        "DESCRIPTION:签到提醒",
+        f"DESCRIPTION:{escape_ics_text(alarm_desc)}",
         "ACTION:DISPLAY",
         "END:VALARM",
         "END:VEVENT",
