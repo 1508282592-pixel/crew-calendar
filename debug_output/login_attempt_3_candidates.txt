@@ -1,2 +1,2 @@
-WXCS
-WXC5
+ASEQ
+A5EQ
