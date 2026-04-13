@@ -30,7 +30,7 @@ UID:航班-9C6153-20260413T225500-20260414T020500@crew-calendar
 SUMMARY:✈️ 9C6153
 DTSTART;TZID=Asia/Shanghai:20260413T225500
 DTEND;TZID=Asia/Shanghai:20260414T020500
-DESCRIPTION:04月13日 周一\n航班：9C6153\n签到：21:05｜上海浦东\n任务：22:55 - 02:05\n机型：A320｜注册号：B30CN\n\n人员名单：\n• 曹兆坤(R)\n• GUZMAN ORLIC JAIME YERKO ANDRES(R)\n• 夏晨迪\n• 许黎(B)\n• 待调整
+DESCRIPTION:04月13日 周一\n航班：9C6153\n签到：21:05｜上海浦东\n任务：22:55 - 02:05\n机型：A320｜注册号：B30CN\n\n人员名单：\n• 曹兆坤(R)\n• GUZMAN ORLIC JAIME YERKO ANDRES(R)\n• 夏晨迪\n• 许黎(B)
 BEGIN:VALARM
 TRIGGER:-PT90M
 DESCRIPTION:9C6153 签到提醒
@@ -42,7 +42,7 @@ UID:航班-9C6154-20260415T054000-20260415T075500@crew-calendar
 SUMMARY:✈️ 9C6154 重庆江北→上海浦东
 DTSTART;TZID=Asia/Shanghai:20260415T054000
 DTEND;TZID=Asia/Shanghai:20260415T075500
-DESCRIPTION:04月15日 周三\n航班：9C6154\n航线：重庆江北 → 上海浦东\n签到：04:00｜重庆江北\n任务：05:40 - 07:55\n机型：A320｜注册号：B328H\n\n人员名单：\n• 曹兆坤(R)\n• GUZMAN ORLIC JAIME YERKO ANDRES(R)\n• 夏晨迪\n• 许黎(B)
+DESCRIPTION:04月15日 周三\n航班：9C6154\n航线：重庆江北 → 上海浦东\n签到：04:00｜重庆江北\n任务：05:40 - 07:55\n机型：A320｜注册号：B30AR\n\n人员名单：\n• 曹兆坤(R)\n• GUZMAN ORLIC JAIME YERKO ANDRES(R)\n• 夏晨迪\n• 许黎(B)
 BEGIN:VALARM
 TRIGGER:-PT90M
 DESCRIPTION:9C6154 签到提醒
@@ -54,7 +54,7 @@ UID:航班-9C7727-20260416T063000-20260416T082500@crew-calendar
 SUMMARY:✈️ 9C7727
 DTSTART;TZID=Asia/Shanghai:20260416T063000
 DTEND;TZID=Asia/Shanghai:20260416T082500
-DESCRIPTION:04月16日 周四\n航班：9C7727\n签到：04:40｜上海浦东\n任务：06:30 - 08:25\n机型：A320｜注册号：B8590\n\n人员名单：\n• 乔硕(R)\n• 曹兆坤(R)\n• 周干程\n• 姚梦佳(B)
+DESCRIPTION:04月16日 周四\n航班：9C7727\n签到：04:40｜上海浦东\n任务：06:30 - 08:25\n机型：A320｜注册号：B6561\n\n人员名单：\n• 乔硕(R)\n• 曹兆坤(R)\n• 周干程\n• 姚梦佳(B)
 BEGIN:VALARM
 TRIGGER:-PT90M
 DESCRIPTION:9C7727 签到提醒
@@ -66,7 +66,7 @@ UID:航班-9C7728-20260416T091000-20260416T105000@crew-calendar
 SUMMARY:✈️ 9C7728
 DTSTART;TZID=Asia/Shanghai:20260416T091000
 DTEND;TZID=Asia/Shanghai:20260416T105000
-DESCRIPTION:04月16日 周四\n航班：9C7728\n签到：07:35｜航班动态\n任务：09:10 - 10:50\n机型：A320｜注册号：B8590\n\n人员名单：\n• 乔硕(R)\n• 曹兆坤(R)\n• 周干程\n• 姚梦佳(B)
+DESCRIPTION:04月16日 周四\n航班：9C7728\n签到：07:35｜航班动态\n任务：09:10 - 10:50\n机型：A320｜注册号：B6561\n\n人员名单：\n• 乔硕(R)\n• 曹兆坤(R)\n• 周干程\n• 姚梦佳(B)
 BEGIN:VALARM
 TRIGGER:-PT90M
 DESCRIPTION:9C7728 签到提醒
